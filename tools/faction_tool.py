@@ -1,0 +1,1237 @@
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from shared.theme import set_dark_theme
+from dictionaries import RACE_BITMASK_DISPLAY, CLASS_BITMASK_DISPLAY
+
+class TreeviewEdit:
+    """Cell editing functionality for Treeview widgets"""
+    def __init__(self, tree, editable_columns=None, update_callback=None):
+        self.tree = tree
+        self.editable_columns = editable_columns or []
+        self.update_callback = update_callback
+        self.editing = False
+        self.edit_cell = None
+        self.edit_entry = None
+        
+        # Bind double-click to start editing
+        self.tree.bind("<Double-1>", self.start_edit)
+        # Bind Escape to cancel editing
+        self.tree.bind("<Escape>", self.cancel_edit)
+        
+    def start_edit(self, event):
+        region = self.tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        
+        column = self.tree.identify_column(event.x)
+        column_index = int(column.replace('#', '')) - 1
+        
+        if column_index not in self.editable_columns:
+            return
+            
+        item_id = self.tree.identify_row(event.y)
+        if not item_id:
+            return
+            
+        current_value = self.tree.item(item_id, "values")[column_index]
+        
+        x, y, width, height = self.tree.bbox(item_id, column)
+        
+        self.edit_entry = ttk.Entry(self.tree)
+        self.edit_entry.insert(0, current_value)
+        self.edit_entry.select_range(0, tk.END)
+        self.edit_entry.place(x=x, y=y, width=width, height=height)
+        self.edit_entry.focus_set()
+        
+        self.edit_entry.bind("<Return>", lambda e: self.save_edit(item_id, column_index))
+        self.edit_entry.bind("<FocusOut>", lambda e: self.cancel_edit(e))
+        
+        self.editing = True
+        self.edit_cell = (item_id, column_index)
+    
+    def save_edit(self, item_id, column_index):
+        if not self.editing:
+            return
+            
+        new_value = self.edit_entry.get()
+        values = list(self.tree.item(item_id, "values"))
+        
+        try:
+            # For numeric columns, convert to appropriate type
+            if column_index in [0, 2, 3, 4, 5]:  # ID and numeric columns
+                new_value = int(new_value)
+            elif column_index in [6]:  # Float columns
+                new_value = float(new_value)
+        except ValueError:
+            messagebox.showerror("Invalid Value", "Please enter a valid value.")
+            self.edit_entry.focus_set()
+            return
+        
+        values[column_index] = new_value
+        self.tree.item(item_id, values=values)
+        
+        if self.update_callback:
+            self.update_callback(self.tree, item_id, column_index, new_value)
+        
+        self.cleanup()
+        
+    def cancel_edit(self, event=None):
+        if not self.editing:
+            return
+        self.cleanup()
+        
+    def cleanup(self):
+        if self.edit_entry:
+            self.edit_entry.destroy()
+            self.edit_entry = None
+        self.editing = False
+        self.edit_cell = None
+
+class FactionManagerTool:
+    """Faction Manager Tool - modular version for tabbed interface"""
+    
+    def __init__(self, parent_frame, db_manager):
+        self.parent = parent_frame
+        self.db_manager = db_manager
+        self.conn = db_manager.connect()
+        self.cursor = db_manager.get_cursor()
+        
+        # Configure parent frame grid
+        self.parent.grid_rowconfigure(0, weight=1)
+        self.parent.grid_columnconfigure(0, weight=1)
+        
+        # Create main container frame
+        self.main_frame = ttk.Frame(self.parent)
+        self.main_frame.grid(row=0, column=0, sticky="nsew")
+        
+        # Initialize UI components
+        self.create_ui()
+        
+        # Load initial data
+        try:
+            self.load_factions()
+            print("Faction tool initialized successfully")
+        except Exception as e:
+            print(f"Warning: Could not initialize faction tool data: {e}")
+    
+    def create_ui(self):
+        """Create the complete Faction Manager UI"""
+        # Configure main frame grid - 2 columns, 2 rows
+        self.main_frame.grid_rowconfigure(0, weight=0)  # Top area 
+        self.main_frame.grid_rowconfigure(1, weight=1)  # Bottom area (NPC list)
+        self.main_frame.grid_columnconfigure(0, weight=0)  # Left column (faction list)
+        self.main_frame.grid_columnconfigure(1, weight=1)  # Right column (everything else)
+        
+        # Create the main sections
+        self.create_left_column()    # Faction list spanning full height
+        self.create_top_right()      # Faction details, modifiers, associations, groups
+        self.create_bottom_area()    # NPC list across full width
+    
+    def create_left_column(self):
+        """Create left column with faction list spanning full height"""
+        # Faction list frame spanning both rows
+        faction_list_frame = ttk.LabelFrame(self.main_frame, text="Faction List", padding="5")
+        faction_list_frame.grid(row=0, column=0, rowspan=2, padx=5, pady=5, sticky="nsew")
+        faction_list_frame.grid_rowconfigure(2, weight=1)
+        faction_list_frame.grid_columnconfigure(0, weight=1)
+        
+        # Search controls
+        search_frame = ttk.Frame(faction_list_frame)
+        search_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        search_frame.grid_columnconfigure(0, weight=1)
+        
+        ttk.Label(search_frame, text="Search Factions:").grid(row=0, column=0, sticky="w")
+        self.faction_search_var = tk.StringVar()
+        self.faction_search_entry = ttk.Entry(search_frame, textvariable=self.faction_search_var, width=25)
+        self.faction_search_entry.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        self.faction_search_var.trace("w", self.filter_factions)
+        
+        # Filter controls
+        filter_frame = ttk.Frame(faction_list_frame)
+        filter_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5))
+        
+        ttk.Button(filter_frame, text="Show All", command=self.show_all_factions).grid(row=0, column=0, padx=(0, 2))
+        ttk.Button(filter_frame, text="Clear", command=self.clear_search).grid(row=0, column=1)
+        
+        # Faction Treeview (two columns, sortable). No extra scrollbars added.
+        self.faction_tree = ttk.Treeview(faction_list_frame, columns=("id", "name"), show="headings")
+        self.faction_tree.heading("id", text="ID")
+        self.faction_tree.heading("name", text="Name")
+        self.faction_tree.column("id", width=60, anchor="center")
+        self.faction_tree.column("name", width=180, anchor="w")
+        self.faction_tree.grid(row=2, column=0, sticky="nsew")
+        self.faction_tree.bind('<<TreeviewSelect>>', self.on_faction_select)
+        
+        # Sorting handlers
+        def sort_tree(col, reverse=False):
+            data = [(self.faction_tree.set(k, col), k) for k in self.faction_tree.get_children("")]
+            if col == 'id':
+                data.sort(key=lambda t: int(t[0]) if t[0].isdigit() else 0, reverse=reverse)
+            else:
+                data.sort(key=lambda t: t[0].lower(), reverse=reverse)
+            for idx, (_, k) in enumerate(data):
+                self.faction_tree.move(k, '', idx)
+            self.faction_tree.heading(col, command=lambda: sort_tree(col, not reverse))
+        self.faction_tree.heading('id', command=lambda: sort_tree('id', False))
+        self.faction_tree.heading('name', command=lambda: sort_tree('name', False))
+    
+    def create_top_right(self):
+        """Create top right area with all faction details and data"""
+        # Main container for top right
+        top_right_frame = ttk.Frame(self.main_frame)
+        top_right_frame.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
+        top_right_frame.grid_rowconfigure(0, weight=0)  # Basic info
+        top_right_frame.grid_rowconfigure(1, weight=0)  # Settings row
+        top_right_frame.grid_rowconfigure(2, weight=1)  # Faction groups/entries row
+        top_right_frame.grid_columnconfigure(0, weight=1)
+        
+        # Basic faction information (top) - merged with Base Data Settings
+        info_frame = ttk.LabelFrame(top_right_frame, text="Basic Faction Information", padding="5")
+        info_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        # Keep columns fixed to avoid over-expansion of Name
+        for c in range(0, 8):
+            info_frame.grid_columnconfigure(c, weight=0)
+        
+        # Basic faction info in 2 columns
+        ttk.Label(info_frame, text="ID:").grid(row=0, column=0, sticky="w", padx=(0, 5))
+        self.faction_id_var = tk.StringVar()
+        self.faction_id_entry = ttk.Entry(info_frame, textvariable=self.faction_id_var, state="readonly", width=10)
+        self.faction_id_entry.grid(row=0, column=1, sticky="ew", padx=(0, 20))
+        
+        ttk.Label(info_frame, text="Name:").grid(row=0, column=2, sticky="w", padx=(0, 5))
+        self.faction_name_var = tk.StringVar()
+        self.faction_name_entry = ttk.Entry(info_frame, textvariable=self.faction_name_var, width=24)
+        self.faction_name_entry.grid(row=0, column=3, sticky="w")
+
+        ttk.Label(info_frame, text="Base Value:").grid(row=1, column=0, sticky="w", padx=(0, 5), pady=(5, 0))
+        self.faction_base_var = tk.StringVar()
+        self.faction_base_entry = ttk.Entry(info_frame, textvariable=self.faction_base_var, width=10)
+        self.faction_base_entry.grid(row=1, column=1, sticky="ew", pady=(5, 0), padx=(0, 20))
+
+        # Merged Base Data Settings (Min/Max) into this section
+        ttk.Label(info_frame, text="Min Value:").grid(row=1, column=2, sticky="w", padx=(0, 5))
+        self.min_value_var = getattr(self, 'min_value_var', tk.StringVar())
+        self.min_value_entry = ttk.Entry(info_frame, textvariable=self.min_value_var, width=10)
+        self.min_value_entry.grid(row=1, column=3, sticky="w", padx=(0, 20))
+
+        ttk.Label(info_frame, text="Max Value:").grid(row=1, column=4, sticky="w", padx=(0, 5))
+        self.max_value_var = getattr(self, 'max_value_var', tk.StringVar())
+        self.max_value_entry = ttk.Entry(info_frame, textvariable=self.max_value_var, width=10)
+        self.max_value_entry.grid(row=1, column=5, sticky="w")
+        
+        # Buttons
+        button_frame = ttk.Frame(info_frame)
+        # Place buttons on the top row, right side
+        button_frame.grid(row=0, column=6, columnspan=2, sticky="e", pady=(0, 0), padx=(10, 0))
+        
+        ttk.Button(button_frame, text="Save Changes", command=self.save_faction).grid(row=0, column=0, padx=(0, 5))
+        ttk.Button(button_frame, text="New Faction", command=self.new_faction).grid(row=0, column=1, padx=(0, 5))
+        ttk.Button(button_frame, text="Delete Faction", command=self.delete_faction).grid(row=0, column=2)
+        ttk.Button(button_frame, text="Explain", command=self.explain_selected_faction).grid(row=0, column=3, padx=(10, 0))
+        
+        # Settings row (explainer, modifiers, associations)
+        settings_frame = ttk.Frame(top_right_frame)
+        settings_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5))
+        settings_frame.grid_columnconfigure(0, weight=1)
+        settings_frame.grid_columnconfigure(1, weight=1)
+        settings_frame.grid_columnconfigure(2, weight=1)
+
+        # Explainer (left)
+        explain_frame = ttk.LabelFrame(settings_frame, text="How Factions Work", padding="5")
+        explain_frame.grid(row=0, column=0, padx=(0, 3), sticky="nsew")
+        # Keep explanation concise to avoid pushing content down
+        explain_text = (
+            "- faction_list: id, name, base\n"
+            "- faction_base_data: min/max clamp\n"
+            "- faction_list_mod: race/class/deity modifiers\n"
+            "- faction_association: up to 5 linked factions\n"
+            "- npc_faction + entries: groups that include factions\n"
+            "- npc_types: uses npc_faction via npc_faction_id"
+        )
+        ttk.Label(explain_frame, text=explain_text, wraplength=360, justify=tk.LEFT).grid(row=0, column=0, sticky="nw")
+        
+        # Race/Class modifiers (center) 
+        mod_frame = ttk.LabelFrame(settings_frame, text="Race/Class/Deity Modifiers", padding="5")
+        mod_frame.grid(row=0, column=1, padx=3, sticky="nsew")
+        mod_frame.grid_rowconfigure(0, weight=1)
+        mod_frame.grid_columnconfigure(0, weight=1)
+        
+        # Modifier treeview
+        self.mod_tree = ttk.Treeview(mod_frame, columns=("mod", "mod_name"), show="headings", height=6)
+        self.mod_tree.heading("#1", text="Modifier")
+        self.mod_tree.heading("#2", text="Race/Class")
+        self.mod_tree.column("#1", width=70)
+        self.mod_tree.column("#2", width=100)
+        self.mod_tree.grid(row=0, column=0, sticky="nsew")
+        
+        mod_scrollbar = ttk.Scrollbar(mod_frame, orient="vertical", command=self.mod_tree.yview)
+        mod_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.mod_tree.config(yscrollcommand=mod_scrollbar.set)
+        
+        # Modifier editing
+        self.mod_editor = TreeviewEdit(self.mod_tree, [0], self.update_modifier)
+        # Modifier controls row
+        mod_btns = ttk.Frame(mod_frame)
+        mod_btns.grid(row=1, column=0, sticky="ew", pady=(5, 0))
+        ttk.Button(mod_btns, text="Add Race", command=lambda: self.open_modifier_picker('race')).pack(side=tk.LEFT, padx=(0, 3))
+        ttk.Button(mod_btns, text="Add Class", command=lambda: self.open_modifier_picker('class')).pack(side=tk.LEFT, padx=(0, 3))
+        ttk.Button(mod_btns, text="Add Deity", command=lambda: self.open_modifier_picker('deity')).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(mod_btns, text="Remove Selected", command=self.remove_selected_modifier).pack(side=tk.LEFT)
+        ttk.Button(mod_btns, text="Bitmask Lookup", command=self.open_bitmask_lookup).pack(side=tk.RIGHT)
+        
+        # Faction associations (right)
+        assoc_frame = ttk.LabelFrame(settings_frame, text="Faction Associations", padding="5")
+        assoc_frame.grid(row=0, column=2, padx=(3, 0), sticky="nsew")
+        assoc_frame.grid_rowconfigure(0, weight=1)
+        assoc_frame.grid_columnconfigure(0, weight=1)
+        
+        # Association treeview
+        self.assoc_tree = ttk.Treeview(assoc_frame, columns=("faction_id", "faction_name", "modifier"), show="headings", height=6)
+        self.assoc_tree.heading("#1", text="Associated Faction ID")
+        self.assoc_tree.heading("#2", text="Faction Name")
+        self.assoc_tree.heading("#3", text="Modifier")
+        self.assoc_tree.column("#1", width=80)
+        self.assoc_tree.column("#2", width=100)
+        self.assoc_tree.column("#3", width=60)
+        self.assoc_tree.grid(row=0, column=0, sticky="nsew")
+        
+        assoc_scrollbar = ttk.Scrollbar(assoc_frame, orient="vertical", command=self.assoc_tree.yview)
+        assoc_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.assoc_tree.config(yscrollcommand=assoc_scrollbar.set)
+        
+        # Association editing - allow editing of faction ID (0) and modifier (2)
+        self.assoc_editor = TreeviewEdit(self.assoc_tree, [0, 2], self.update_association)
+        assoc_btns = ttk.Frame(assoc_frame)
+        assoc_btns.grid(row=1, column=0, sticky="ew", pady=(5, 0))
+        ttk.Button(assoc_btns, text="Add Association", command=self.add_association).pack(side=tk.LEFT)
+        ttk.Button(assoc_btns, text="Remove Selected", command=self.remove_selected_association).pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Faction groups and entries row
+        groups_frame = ttk.Frame(top_right_frame)
+        groups_frame.grid(row=2, column=0, sticky="nsew")
+        groups_frame.grid_rowconfigure(0, weight=1)
+        groups_frame.grid_columnconfigure(0, weight=1)
+        groups_frame.grid_columnconfigure(1, weight=1)
+        
+        # NPC Faction Groups (left)
+        faction_groups_frame = ttk.LabelFrame(groups_frame, text="NPC Faction Groups", padding="5")
+        faction_groups_frame.grid(row=0, column=0, padx=(0, 3), sticky="nsew")
+        faction_groups_frame.grid_rowconfigure(0, weight=1)
+        faction_groups_frame.grid_columnconfigure(0, weight=1)
+        
+        # Faction groups treeview
+        self.faction_groups_tree = ttk.Treeview(faction_groups_frame, 
+                                               columns=("id", "name", "primaryfaction", "primary_faction_name", "ignore_primary_assist"), 
+                                               show="headings", height=10)
+        self.faction_groups_tree.heading("#1", text="Group ID")
+        self.faction_groups_tree.heading("#2", text="Name")
+        self.faction_groups_tree.heading("#3", text="Primary Faction ID")
+        self.faction_groups_tree.heading("#4", text="Primary Faction Name")
+        self.faction_groups_tree.heading("#5", text="Ignore Primary Assist")
+        
+        self.faction_groups_tree.column("#1", width=70)
+        self.faction_groups_tree.column("#2", width=120)
+        self.faction_groups_tree.column("#3", width=80)
+        self.faction_groups_tree.column("#4", width=120)
+        self.faction_groups_tree.column("#5", width=100)
+        
+        self.faction_groups_tree.grid(row=0, column=0, sticky="nsew")
+        self.faction_groups_tree.bind('<<TreeviewSelect>>', self.on_faction_group_select)
+        
+        groups_scrollbar = ttk.Scrollbar(faction_groups_frame, orient="vertical", command=self.faction_groups_tree.yview)
+        groups_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.faction_groups_tree.config(yscrollcommand=groups_scrollbar.set)
+        
+        # NPC Faction Entries (right)
+        faction_entries_frame = ttk.LabelFrame(groups_frame, text="Faction Entries for Selected Group", padding="5")
+        faction_entries_frame.grid(row=0, column=1, padx=(3, 0), sticky="nsew")
+        faction_entries_frame.grid_rowconfigure(0, weight=1)
+        faction_entries_frame.grid_columnconfigure(0, weight=1)
+        
+        # Faction entries treeview
+        self.faction_entries_tree = ttk.Treeview(faction_entries_frame, 
+                                                columns=("npc_faction_id", "faction_id", "faction_name", "value", "npc_value", "temp"), 
+                                                show="headings", height=10)
+        self.faction_entries_tree.heading("#1", text="NPC Faction ID")
+        self.faction_entries_tree.heading("#2", text="Faction ID")
+        self.faction_entries_tree.heading("#3", text="Faction Name")
+        self.faction_entries_tree.heading("#4", text="Faction Hit")
+        self.faction_entries_tree.heading("#5", text="NPC Reaction")
+        self.faction_entries_tree.heading("#6", text="Temporary")
+        
+        self.faction_entries_tree.column("#1", width=90)
+        self.faction_entries_tree.column("#2", width=70)
+        self.faction_entries_tree.column("#3", width=150)
+        self.faction_entries_tree.column("#4", width=50)
+        self.faction_entries_tree.column("#5", width=70)
+        self.faction_entries_tree.column("#6", width=40)
+        
+        self.faction_entries_tree.grid(row=0, column=0, sticky="nsew")
+        # Minimal legend to clarify meanings without altering layout size
+        legend = "Faction Hit: +/- player standing; NPC Reaction: 1=Assist, 0=Neutral, -1=Hostile; Temporary: 1=yes"
+        ttk.Label(faction_entries_frame, text=legend, justify=tk.LEFT).grid(row=1, column=0, sticky="w", pady=(4,0))
+    
+    def create_bottom_area(self):
+        """Create bottom area with NPC list across full width"""
+        # NPC list frame spanning full width
+        npc_frame = ttk.LabelFrame(self.main_frame, text="NPCs Using This Faction", padding="5")
+        npc_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=(0, 5), sticky="nsew")
+        npc_frame.grid_rowconfigure(1, weight=1)
+        npc_frame.grid_columnconfigure(0, weight=1)
+        
+        # Search controls
+        npc_search_frame = ttk.Frame(npc_frame)
+        npc_search_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        npc_search_frame.grid_columnconfigure(0, weight=1)
+        
+        ttk.Label(npc_search_frame, text="Search NPCs:").grid(row=0, column=0, sticky="w")
+        self.npc_search_var = tk.StringVar()
+        self.npc_search_entry = ttk.Entry(npc_search_frame, textvariable=self.npc_search_var)
+        self.npc_search_entry.grid(row=1, column=0, sticky="ew")
+        self.npc_search_var.trace("w", self.filter_npcs)
+        
+        # NPC treeview with all columns from loot_tool plus faction name
+        npc_columns = ("ID", "Name", "Lvl", "Race", "Class", "Body", "HP", "Mana",
+                      "Gender", "Texture", "Helm\nTexture", "Size", "  Loot\nTable ID", "Spells\n  ID", "Faction\n   ID", "Faction\nName",
+                      "Min\ndmg", "Max\ndmg", "Npcspecial\n  attks", "Special\nAbilities", "MR", "CR", "DR", "FR", "PR", "AC",
+                      "Attk Delay", "STR", "STA", "DEX", "AGI", "_INT", "WIS", "Maxlevel",
+                      "Skip Global Loot", "Exp Mod")
+        
+        self.npc_tree = ttk.Treeview(npc_frame, columns=npc_columns, show="headings", height=15)
+        
+        # Define column widths like the original
+        column_widths = {
+            "ID": 50, "Name": 150, "Lvl": 25, "Race": 35, "Class": 39, "Body": 36, "HP": 25, "Mana": 35,
+            "Gender": 45, "Texture": 45, "Helm\nTexture": 40, "Size": 45, "  Loot\nTable ID": 50, "Spells\n  ID": 50, 
+            "Faction\n   ID": 45, "Faction\nName": 120, "Min\ndmg": 40, "Max\ndmg": 40, "Npcspecial\n  attks": 55, "Special\nAbilities": 50,
+            "MR": 35, "CR": 35, "DR": 35, "FR": 35, "PR": 35, "AC": 35, "Attk Delay": 50,
+            "STR": 35, "STA": 35, "DEX": 35, "AGI": 35, "_INT": 35, "WIS": 35, "Maxlevel": 45,
+            "Skip Global Loot": 60, "Exp Mod": 45
+        }
+        
+        # Set up columns
+        for col in npc_columns:
+            self.npc_tree.heading(col, text=col)
+            self.npc_tree.column(col, width=column_widths.get(col, 80))
+        
+        self.npc_tree.grid(row=1, column=0, sticky="nsew")
+        
+        npc_scrollbar = ttk.Scrollbar(npc_frame, orient="vertical", command=self.npc_tree.yview)
+        npc_scrollbar.grid(row=1, column=1, sticky="ns")
+        self.npc_tree.config(yscrollcommand=npc_scrollbar.set)
+        
+        # NPC editing disabled per request (view-only)
+        
+        # Buttons
+        npc_button_frame = ttk.Frame(npc_frame)
+        npc_button_frame.grid(row=2, column=0, sticky="ew", pady=(5, 0))
+        
+        ttk.Button(npc_button_frame, text="Refresh NPCs", command=self.refresh_npcs).grid(row=0, column=0)
+        ttk.Button(npc_button_frame, text="Show All NPCs", command=self.show_all_npcs).grid(row=0, column=1, padx=(5, 0))
+    
+    def load_factions(self):
+        """Load factions from database"""
+        try:
+            query = "SELECT id, name, base FROM faction_list ORDER BY name"
+            factions = self.db_manager.execute_query(query)
+            
+            # Clear tree and local cache
+            if hasattr(self, 'faction_tree'):
+                for item in self.faction_tree.get_children():
+                    self.faction_tree.delete(item)
+            self.factions = {}
+            
+            for faction in factions:
+                # Insert into treeview with two columns
+                if hasattr(self, 'faction_tree'):
+                    self.faction_tree.insert('', 'end', values=(faction['id'], faction['name']))
+                self.factions[faction['id']] = faction
+                
+        except Exception as e:
+            messagebox.showerror("Database Error", f"Failed to load factions: {e}")
+    
+    def filter_factions(self, *args):
+        """Filter faction list based on search term"""
+        search_term = self.faction_search_var.get().lower()
+        
+        if not hasattr(self, 'faction_tree'):
+            return
+        # Rebuild filtered rows
+        for item in self.faction_tree.get_children():
+            self.faction_tree.delete(item)
+        for faction_id, faction in self.factions.items():
+            if search_term in str(faction['id']).lower() or search_term in faction['name'].lower():
+                self.faction_tree.insert('', 'end', values=(faction['id'], faction['name']))
+    
+    def clear_search(self):
+        """Clear search and show all factions"""
+        self.faction_search_var.set("")
+        self.show_all_factions()
+    
+    def show_all_factions(self):
+        """Show all factions in list"""
+        if not hasattr(self, 'faction_tree'):
+            return
+        for item in self.faction_tree.get_children():
+            self.faction_tree.delete(item)
+        for faction_id, faction in self.factions.items():
+            self.faction_tree.insert('', 'end', values=(faction['id'], faction['name']))
+    
+    def on_faction_select(self, event):
+        """Handle faction selection"""
+        if not hasattr(self, 'faction_tree'):
+            return
+        sel = self.faction_tree.selection()
+        if not sel:
+            return
+        values = self.faction_tree.item(sel[0], 'values')
+        if not values:
+            return
+        faction_id = int(values[0])
+        
+        self.load_faction_details(faction_id)
+        self.load_faction_modifiers(faction_id)
+        self.load_faction_base_data(faction_id)
+        self.load_faction_associations(faction_id)
+        self.load_faction_groups(faction_id)
+        self.load_faction_npcs(faction_id)
+    
+    def load_faction_details(self, faction_id):
+        """Load faction details into form"""
+        faction = self.factions.get(faction_id)
+        if faction:
+            self.faction_id_var.set(str(faction['id']))
+            self.faction_name_var.set(faction['name'])
+            self.faction_base_var.set(str(faction['base']))
+            # Ensure association slot map resets
+            self.assoc_row_to_slot = {}
+    
+    def load_faction_modifiers(self, faction_id):
+        """Load faction modifiers"""
+        try:
+            query = "SELECT `mod`, `mod_name` FROM faction_list_mod WHERE faction_id = %s"
+            modifiers = self.db_manager.execute_query(query, (faction_id,))
+            
+            # Clear existing items
+            for item in self.mod_tree.get_children():
+                self.mod_tree.delete(item)
+            
+            # Add modifiers
+            for mod in modifiers:
+                self.mod_tree.insert("", "end", values=(mod['mod'], mod['mod_name']))
+                
+        except Exception as e:
+            print(f"Error loading faction modifiers: {e}")
+    
+    def load_faction_base_data(self, faction_id):
+        """Load faction base data settings"""
+        try:
+            query = "SELECT min, max FROM faction_base_data WHERE client_faction_id = %s"
+            base_data = self.db_manager.execute_query(query, (faction_id,), fetch_all=False)
+            
+            if base_data:
+                self.min_value_var.set(str(base_data['min']))
+                self.max_value_var.set(str(base_data['max']))
+            else:
+                self.min_value_var.set("-2000")
+                self.max_value_var.set("2000")
+                
+        except Exception as e:
+            print(f"Error loading faction base data: {e}")
+    
+    def load_faction_associations(self, faction_id):
+        """Load faction associations"""
+        try:
+            # Clear existing items
+            for item in self.assoc_tree.get_children():
+                self.assoc_tree.delete(item)
+            # Reset slot mapping
+            self.assoc_row_to_slot = {}
+            
+            # Load associations from faction_association table with faction names
+            query = """
+                SELECT id_1, mod_1, id_2, mod_2, id_3, mod_3, id_4, mod_4, id_5, mod_5
+                FROM faction_association 
+                WHERE id = %s
+            """
+            associations = self.db_manager.execute_query(query, (faction_id,), fetch_all=False)
+            
+            if associations:
+                # Add each non-null association as a separate row
+                for i in range(1, 6):  # id_1 through id_5
+                    faction_id_key = f'id_{i}'
+                    mod_key = f'mod_{i}'
+                    
+                    if associations.get(faction_id_key) and associations[faction_id_key] != 0:
+                        # Get faction name for this associated faction
+                        assoc_faction_id = associations[faction_id_key]
+                        faction_name_query = "SELECT name FROM faction_list WHERE id = %s"
+                        faction_name_result = self.db_manager.execute_query(faction_name_query, (assoc_faction_id,), fetch_all=False)
+                        faction_name = faction_name_result['name'] if faction_name_result else 'Unknown'
+                        item = self.assoc_tree.insert("", "end", values=(
+                            associations[faction_id_key], 
+                            faction_name,
+                            associations[mod_key]
+                        ))
+                        # Track which slot this row maps to
+                        self.assoc_row_to_slot[item] = i
+
+        except Exception as e:
+            print(f"Error loading faction associations: {e}")
+    
+    def load_faction_groups(self, faction_id):
+        """Load NPC faction groups that contain this faction"""
+        try:
+            # Clear existing items
+            for item in self.faction_groups_tree.get_children():
+                self.faction_groups_tree.delete(item)
+            
+            # Load faction groups that have entries for this faction
+            query = """
+                SELECT DISTINCT nf.id, nf.name, nf.primaryfaction, fl.name as primary_faction_name, nf.ignore_primary_assist
+                FROM npc_faction nf
+                LEFT JOIN faction_list fl ON nf.primaryfaction = fl.id
+                JOIN npc_faction_entries nfe ON nf.id = nfe.npc_faction_id
+                WHERE nfe.faction_id = %s
+                ORDER BY nf.id
+            """
+            groups = self.db_manager.execute_query(query, (faction_id,))
+            
+            for group in groups:
+                self.faction_groups_tree.insert("", "end", values=(
+                    group['id'],
+                    group['name'] or '',
+                    group['primaryfaction'],
+                    group['primary_faction_name'] or 'Unknown',
+                    group['ignore_primary_assist']
+                ))
+                
+        except Exception as e:
+            print(f"Error loading faction groups: {e}")
+    
+    def on_faction_group_select(self, event):
+        """Handle faction group selection to load entries"""
+        selection = self.faction_groups_tree.selection()
+        if not selection:
+            return
+            
+        item = selection[0]
+        values = self.faction_groups_tree.item(item, "values")
+        npc_faction_id = values[0]
+        
+        self.load_faction_entries(npc_faction_id)
+
+    def add_association(self):
+        """Add a new association into the next free slot (1..5)."""
+        faction_id = self.faction_id_var.get()
+        if not faction_id:
+            messagebox.showwarning("No Selection", "Select a faction first")
+            return
+        # Find next free slot by reading row
+        row = self.db_manager.execute_query(
+            "SELECT id_1, id_2, id_3, id_4, id_5 FROM faction_association WHERE id = %s",
+            (int(faction_id),), fetch_all=False
+        )
+        # If no row, create one with all zeros
+        if not row:
+            self.db_manager.execute_update(
+                "INSERT INTO faction_association (id, id_1, mod_1, id_2, mod_2, id_3, mod_3, id_4, mod_4, id_5, mod_5) VALUES (%s,0,0,0,0,0,0,0,0,0,0)",
+                (int(faction_id),)
+            )
+            row = {f'id_{i}': 0 for i in range(1,6)}
+        slot = None
+        for i in range(1,6):
+            if (row.get(f'id_{i}') or 0) == 0:
+                slot = i
+                break
+        if not slot:
+            messagebox.showinfo("Full", "All 5 association slots are used")
+            return
+        # Pick a faction to associate
+        picker = tk.Toplevel(self.parent)
+        picker.title("Add Association")
+        picker.geometry("360x440")
+        picker.transient(self.parent)
+        picker.grab_set()
+        ttk.Label(picker, text="Search Factions:").pack(anchor='w', padx=6, pady=(6,2))
+        s = tk.StringVar()
+        e = ttk.Entry(picker, textvariable=s)
+        e.pack(fill=tk.X, padx=6)
+        lb = tk.Listbox(picker)
+        lb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        # Load factions
+        all_f = self.db_manager.execute_query("SELECT id, name FROM faction_list ORDER BY name")
+        def feed():
+            term = s.get().lower()
+            lb.delete(0, tk.END)
+            for f in all_f:
+                txt = f"{f['id']}: {f['name']}"
+                if term in txt.lower():
+                    lb.insert(tk.END, txt)
+        s.trace_add('write', lambda *a: feed())
+        feed()
+        mod_var = tk.IntVar(value=0)
+        frm = ttk.Frame(picker)
+        frm.pack(fill=tk.X, padx=6, pady=(0,6))
+        ttk.Label(frm, text="Modifier:").pack(side=tk.LEFT)
+        ttk.Entry(frm, textvariable=mod_var, width=8).pack(side=tk.LEFT, padx=(6,0))
+        def add():
+            sel = lb.curselection()
+            if not sel:
+                return
+            sel_txt = lb.get(sel[0])
+            assoc_id = int(sel_txt.split(':',1)[0])
+            self.db_manager.execute_update(
+                f"UPDATE faction_association SET id_{slot} = %s, mod_{slot} = %s WHERE id = %s",
+                (assoc_id, int(mod_var.get()), int(faction_id))
+            )
+            # reload view
+            self.load_faction_associations(int(faction_id))
+            picker.destroy()
+        ttk.Button(picker, text="Add", command=add).pack(pady=(0,8))
+        e.focus_set()
+
+    def remove_selected_association(self):
+        """Remove currently selected association row (zero out its slot)."""
+        faction_id = self.faction_id_var.get()
+        if not faction_id:
+            return
+        sel = self.assoc_tree.selection()
+        if not sel:
+            return
+        item = sel[0]
+        slot = self.assoc_row_to_slot.get(item)
+        if not slot:
+            return
+        try:
+            self.db_manager.execute_update(
+                f"UPDATE faction_association SET id_{slot} = 0, mod_{slot} = 0 WHERE id = %s",
+                (int(faction_id),)
+            )
+            self.assoc_tree.delete(item)
+        except Exception as e:
+            messagebox.showerror("Database Error", f"Failed to remove association: {e}")
+
+    def explain_selected_faction(self):
+        """Show a concise explanation dialog of relationships for the selected faction."""
+        fid = self.faction_id_var.get()
+        if not fid:
+            return
+        try:
+            fid = int(fid)
+            # Gather counts
+            groups = self.db_manager.execute_query(
+                """
+                SELECT COUNT(DISTINCT nf.id) AS cnt
+                FROM npc_faction nf
+                JOIN npc_faction_entries nfe ON nf.id = nfe.npc_faction_id
+                WHERE nfe.faction_id = %s
+                """,
+                (fid,), fetch_all=False)
+            group_cnt = groups['cnt'] if groups else 0
+            npcs = self.db_manager.execute_query(
+                """
+                SELECT COUNT(DISTINCT nt.id) AS cnt
+                FROM npc_types nt
+                WHERE nt.npc_faction_id IN (
+                    SELECT nfc.id FROM npc_faction nfc JOIN npc_faction_entries nfe ON nfc.id = nfe.npc_faction_id WHERE nfe.faction_id = %s
+                )
+                """,
+                (fid,), fetch_all=False)
+            npc_cnt = npcs['cnt'] if npcs else 0
+            assoc = self.db_manager.execute_query("SELECT * FROM faction_association WHERE id = %s", (fid,), fetch_all=False)
+            assoc_list = []
+            if assoc:
+                for i in range(1,6):
+                    aid = assoc.get(f'id_{i}')
+                    if aid and aid != 0:
+                        nm = self.db_manager.execute_query("SELECT name FROM faction_list WHERE id = %s", (aid,), fetch_all=False)
+                        assoc_list.append(f"Slot {i}: {aid} - {(nm['name'] if nm else 'Unknown')} (mod {assoc.get(f'mod_{i}',0)})")
+            text = "\n".join([
+                f"Faction {fid} relationships:",
+                f"- Groups containing this faction: {group_cnt}",
+                f"- NPCs using those groups: {npc_cnt}",
+                "- Associations:",
+                *(assoc_list or ["  None"])
+            ])
+            dlg = tk.Toplevel(self.parent)
+            dlg.title("Faction Relationships")
+            dlg.geometry("520x340")
+            dlg.transient(self.parent)
+            ttk.Label(dlg, text=text, justify=tk.LEFT).pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+            ttk.Button(dlg, text="Close", command=dlg.destroy).pack(pady=(0,8))
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not explain relationships: {e}")
+    
+    def load_faction_entries(self, npc_faction_id):
+        """Load faction entries for a specific NPC faction group"""
+        try:
+            # Clear existing items
+            for item in self.faction_entries_tree.get_children():
+                self.faction_entries_tree.delete(item)
+            
+            # Load faction entries for this group
+            query = """
+                SELECT nfe.npc_faction_id, nfe.faction_id, fl.name as faction_name, 
+                       nfe.value, nfe.npc_value, nfe.temp
+                FROM npc_faction_entries nfe
+                LEFT JOIN faction_list fl ON nfe.faction_id = fl.id
+                WHERE nfe.npc_faction_id = %s
+                ORDER BY nfe.faction_id
+            """
+            entries = self.db_manager.execute_query(query, (npc_faction_id,))
+            
+            for entry in entries:
+                self.faction_entries_tree.insert("", "end", values=(
+                    entry['npc_faction_id'],
+                    entry['faction_id'],
+                    entry['faction_name'] or 'Unknown',
+                    entry['value'],
+                    entry['npc_value'],
+                    entry['temp']
+                ))
+                
+        except Exception as e:
+            print(f"Error loading faction entries: {e}")
+    
+    def load_faction_npcs(self, faction_id):
+        """Load NPCs that use this faction"""
+        try:
+            # Clear existing items
+            for item in self.npc_tree.get_children():
+                self.npc_tree.delete(item)
+            
+            # Load NPCs with faction assignments - using same query structure as loot_tool plus faction name
+            query = """
+                SELECT DISTINCT nt.id, nt.name, nt.level, nt.race, nt.class, nt.bodytype, nt.hp, nt.mana,
+                       nt.gender, nt.texture, nt.helmtexture, nt.size, nt.loottable_id, nt.npc_spells_id, nt.npc_faction_id,
+                       nf.name as faction_group_name,
+                       nt.mindmg, nt.maxdmg, nt.npcspecialattks, nt.special_abilities, nt.MR, nt.CR, nt.DR, nt.FR, nt.PR, nt.AC,
+                       nt.attack_delay, nt.STR, nt.STA, nt.DEX, nt.AGI, nt._INT, nt.WIS,
+                       nt.maxlevel, nt.skip_global_loot, nt.exp_mod
+                FROM npc_types nt
+                LEFT JOIN npc_faction nf ON nt.npc_faction_id = nf.id
+                WHERE nt.npc_faction_id IN (
+                    SELECT nfc.id 
+                    FROM npc_faction nfc 
+                    JOIN npc_faction_entries nfe ON nfc.id = nfe.npc_faction_id 
+                    WHERE nfe.faction_id = %s
+                )
+                ORDER BY nt.name
+                LIMIT 1000
+            """
+            npcs = self.db_manager.execute_query(query, (faction_id,))
+            
+            for npc in npcs:
+                npc_values = [
+                    npc.get('id'), npc.get('name'), npc.get('level'), npc.get('race'), npc.get('class'),
+                    npc.get('bodytype'), npc.get('hp'), npc.get('mana'), npc.get('gender'), npc.get('texture'),
+                    npc.get('helmtexture'), npc.get('size'), npc.get('loottable_id'), npc.get('npc_spells_id'),
+                    npc.get('npc_faction_id'), npc.get('faction_group_name') or 'Unknown', npc.get('mindmg'), npc.get('maxdmg'),
+                    npc.get('npcspecialattks'), npc.get('special_abilities'), npc.get('MR'), npc.get('CR'), 
+                    npc.get('DR'), npc.get('FR'), npc.get('PR'), npc.get('AC'), npc.get('attack_delay'), 
+                    npc.get('STR'), npc.get('STA'), npc.get('DEX'), npc.get('AGI'), npc.get('_INT'), 
+                    npc.get('WIS'), npc.get('maxlevel'), npc.get('skip_global_loot'), npc.get('exp_mod')
+                ]
+                self.npc_tree.insert("", "end", values=npc_values)
+                
+        except Exception as e:
+            messagebox.showerror("Database Error", f"Failed to load NPCs: {e}")
+    
+    def save_faction(self):
+        """Save faction changes"""
+        try:
+            faction_id = self.faction_id_var.get()
+            name = self.faction_name_var.get()
+            base = self.faction_base_var.get()
+            
+            if not faction_id or not name:
+                messagebox.showwarning("Invalid Data", "Faction ID and Name are required")
+                return
+            
+            # Upsert faction_list
+            self.db_manager.execute_update(
+                """
+                INSERT INTO faction_list (id, name, base)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE name = VALUES(name), base = VALUES(base)
+                """,
+                (int(faction_id), name, int(base))
+            )
+            
+            # Update base data if exists
+            min_val = self.min_value_var.get() or "-2000"
+            max_val = self.max_value_var.get() or "2000"
+            
+            self.db_manager.execute_update(
+                """
+                INSERT INTO faction_base_data (client_faction_id, min, max)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE min = VALUES(min), max = VALUES(max)
+                """,
+                (int(faction_id), int(min_val), int(max_val))
+            )
+            
+            messagebox.showinfo("Success", "Faction saved successfully")
+            self.load_factions()  # Refresh the list
+            
+        except Exception as e:
+            messagebox.showerror("Database Error", f"Failed to save faction: {e}")
+    
+    def new_faction(self):
+        """Create new faction"""
+        # Auto-assign next available ID, allow override
+        faction_id = self.find_next_available_faction_id()
+        if faction_id is None:
+            messagebox.showerror("Error", "Could not determine next available faction ID")
+            return
+        # Let user confirm or adjust
+        faction_id = simpledialog.askinteger("New Faction", "Enter new faction ID:", initialvalue=faction_id)
+        if not faction_id:
+            return
+        if faction_id in self.factions:
+            messagebox.showwarning("ID Exists", "This faction ID already exists")
+            return
+            
+        self.faction_id_var.set(str(faction_id))
+        self.faction_name_var.set("")
+        self.faction_base_var.set("0")
+        self.min_value_var.set("-2000")
+        self.max_value_var.set("2000")
+        
+        # Clear modifiers and NPCs
+        for item in self.mod_tree.get_children():
+            self.mod_tree.delete(item)
+        for item in self.npc_tree.get_children():
+            self.npc_tree.delete(item)
+
+    def find_next_available_faction_id(self, start_id=1):
+        """Find the smallest available faction_list.id >= start_id"""
+        try:
+            row = self.db_manager.execute_query(
+                """
+                SELECT MIN(t.id) AS next_id FROM (
+                    SELECT %s AS id
+                    UNION ALL
+                    SELECT id + 1 FROM faction_list
+                ) AS t
+                LEFT JOIN faction_list f ON t.id = f.id
+                WHERE t.id >= %s AND f.id IS NULL
+                LIMIT 1
+                """,
+                (start_id, start_id),
+                fetch_all=False,
+            )
+            return row['next_id'] if row and row.get('next_id') is not None else start_id
+        except Exception:
+            # Fallback: linear scan (safe if table not huge)
+            existing = self.db_manager.execute_query("SELECT id FROM faction_list ORDER BY id")
+            used = {r['id'] for r in existing}
+            cur = start_id
+            while cur in used:
+                cur += 1
+            return cur
+    
+    def delete_faction(self):
+        """Delete selected faction"""
+        faction_id = self.faction_id_var.get()
+        if not faction_id:
+            messagebox.showwarning("No Selection", "No faction selected")
+            return
+            
+        if messagebox.askyesno("Confirm Delete", f"Delete faction {faction_id}? This will also delete all associated data."):
+            try:
+                # Delete direct rows
+                self.db_manager.execute_update("DELETE FROM faction_list_mod WHERE faction_id = %s", (faction_id,))
+                self.db_manager.execute_update("DELETE FROM faction_base_data WHERE client_faction_id = %s", (faction_id,))
+                self.db_manager.execute_update("DELETE FROM npc_faction_entries WHERE faction_id = %s", (faction_id,))
+                # Delete association row for this faction
+                self.db_manager.execute_update("DELETE FROM faction_association WHERE id = %s", (faction_id,))
+                # Scrub other associations referencing this faction (slots 1..5)
+                for i in range(1, 6):
+                    self.db_manager.execute_update(
+                        f"UPDATE faction_association SET id_{i} = 0, mod_{i} = 0 WHERE id_{i} = %s",
+                        (faction_id,)
+                    )
+                # Finally delete the faction
+                self.db_manager.execute_update("DELETE FROM faction_list WHERE id = %s", (faction_id,))
+                messagebox.showinfo("Success", "Faction deleted successfully")
+                self.load_factions()
+                
+                # Clear form
+                self.faction_id_var.set("")
+                self.faction_name_var.set("")
+                self.faction_base_var.set("")
+                
+            except Exception as e:
+                messagebox.showerror("Database Error", f"Failed to delete faction: {e}")
+    
+    def update_modifier(self, tree, item_id, column_index, new_value):
+        """Update faction modifier in database"""
+        try:
+            faction_id = self.faction_id_var.get()
+            if not faction_id:
+                return
+                
+            values = tree.item(item_id, "values")
+            mod_name = values[1]
+            
+            self.db_manager.execute_update(
+                "UPDATE faction_list_mod SET mod = %s WHERE faction_id = %s AND mod_name = %s",
+                (int(new_value), int(faction_id), mod_name)
+            )
+            
+        except Exception as e:
+            messagebox.showerror("Database Error", f"Failed to update modifier: {e}")
+
+    def open_modifier_picker(self, kind):
+        """Open a modal to pick a Race/Class/Deity to add as modifier with default 0."""
+        faction_id = self.faction_id_var.get()
+        if not faction_id:
+            messagebox.showwarning("No Selection", "Select a faction first")
+            return
+        picker = tk.Toplevel(self.parent)
+        picker.title(f"Add {kind.capitalize()} Modifier")
+        picker.geometry("340x420")
+        picker.transient(self.parent)
+        picker.grab_set()
+        ttk.Label(picker, text="Search:").pack(anchor='w', padx=6, pady=(6,2))
+        search = tk.StringVar()
+        entry = ttk.Entry(picker, textvariable=search)
+        entry.pack(fill=tk.X, padx=6)
+        listbox = tk.Listbox(picker)
+        listbox.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        # Build options
+        if kind == 'race':
+            options = sorted(RACE_BITMASK_DISPLAY.items(), key=lambda x: x[1])
+            items = [name for _, name in options if name != 'ALL']
+        elif kind == 'class':
+            options = sorted(CLASS_BITMASK_DISPLAY.items(), key=lambda x: x[1])
+            items = [name for _, name in options if name != 'ALL']
+        else:  # deity
+            # Use full names from DEITY_OPTIONS
+            items = sorted(DEITY_OPTIONS.keys())
+        def refresh():
+            term = search.get().lower()
+            listbox.delete(0, tk.END)
+            for name in items:
+                if term in name.lower():
+                    listbox.insert(tk.END, name)
+        search.trace_add('write', lambda *a: refresh())
+        refresh()
+        def add_selected():
+            sel = listbox.curselection()
+            if not sel:
+                return
+            name = listbox.get(sel[0])
+            try:
+                # Insert if not exists
+                self.db_manager.execute_update(
+                    """
+                    INSERT INTO faction_list_mod (faction_id, mod, mod_name)
+                    VALUES (%s, %s, %s)
+                    ON DUPLICATE KEY UPDATE mod = mod
+                    """,
+                    (int(faction_id), 0, name)
+                )
+                # Refresh modifiers view
+                self.load_faction_modifiers(int(faction_id))
+                picker.destroy()
+            except Exception as e:
+                messagebox.showerror("Database Error", f"Failed to add modifier: {e}")
+        ttk.Button(picker, text="Add", command=add_selected).pack(pady=(0,8))
+        entry.focus_set()
+
+    def remove_selected_modifier(self):
+        """Remove the selected modifier row."""
+        faction_id = self.faction_id_var.get()
+        if not faction_id:
+            return
+        sel = self.mod_tree.selection()
+        if not sel:
+            return
+        values = self.mod_tree.item(sel[0], 'values')
+        mod_name = values[1]
+        try:
+            self.db_manager.execute_update(
+                "DELETE FROM faction_list_mod WHERE faction_id = %s AND mod_name = %s",
+                (int(faction_id), mod_name)
+            )
+            self.mod_tree.delete(sel[0])
+        except Exception as e:
+            messagebox.showerror("Database Error", f"Failed to remove modifier: {e}")
+
+    def open_bitmask_lookup(self):
+        """Helper dialog to compute bitmasks for Race/Class/Deity selections."""
+        dlg = tk.Toplevel(self.parent)
+        dlg.title("Bitmask Lookup")
+        dlg.geometry("420x480")
+        dlg.transient(self.parent)
+        dlg.grab_set()
+        nb = ttk.Notebook(dlg)
+        nb.pack(fill=tk.BOTH, expand=True)
+        frames = {}
+        for tab in ('Race','Class','Deity'):
+            f = ttk.Frame(nb)
+            nb.add(f, text=tab)
+            frames[tab] = f
+        # Race
+        race_vars = []
+        race_frame = frames['Race']
+        for val,name in sorted(RACE_BITMASK_DISPLAY.items()):
+            if name=='ALL':
+                continue
+            v=tk.IntVar()
+            chk=ttk.Checkbutton(race_frame,text=f"{name} ({val})",variable=v)
+            chk.pack(anchor='w')
+            race_vars.append((v,val))
+        # Class
+        class_vars=[]
+        class_frame = frames['Class']
+        for val,name in sorted(CLASS_BITMASK_DISPLAY.items()):
+            if name=='ALL':
+                continue
+            v=tk.IntVar()
+            chk=ttk.Checkbutton(class_frame,text=f"{name} ({val})",variable=v)
+            chk.pack(anchor='w')
+            class_vars.append((v,val))
+        # Deity (use names only; show bit values from DEITY_OPTIONS)
+        deity_vars=[]
+        deity_frame = frames['Deity']
+        for name,val in sorted(DEITY_OPTIONS.items(), key=lambda x:x[0]):
+            v=tk.IntVar()
+            chk=ttk.Checkbutton(deity_frame,text=f"{name} ({val})",variable=v)
+            chk.pack(anchor='w')
+            deity_vars.append((v,val))
+        # Output
+        out = tk.StringVar(value="Race=0, Class=0, Deity=0")
+        ttk.Label(dlg,textvariable=out).pack(pady=6)
+        def compute():
+            rv=sum(val for v,val in race_vars if v.get())
+            cv=sum(val for v,val in class_vars if v.get())
+            dv=sum(val for v,val in deity_vars if v.get())
+            out.set(f"Race={rv}, Class={cv}, Deity={dv}")
+        ttk.Button(dlg,text="Compute",command=compute).pack(pady=(0,8))
+    
+    def update_npc_faction(self, tree, item_id, column_index, new_value):
+        """Update NPC faction assignment"""
+        try:
+            values = tree.item(item_id, "values")
+            npc_id = values[0]
+            
+            cursor = self.db_manager.get_cursor()
+            query = "UPDATE npc_types SET npc_faction_id = %s WHERE id = %s"
+            cursor.execute(query, (new_value, npc_id))
+            self.conn.commit()
+            
+        except Exception as e:
+            messagebox.showerror("Database Error", f"Failed to update NPC faction: {e}")
+    
+    def update_association(self, tree, item_id, column_index, new_value):
+        """Update faction association"""
+        try:
+            current_faction_id = self.faction_id_var.get()
+            if not current_faction_id:
+                return
+                
+            values = tree.item(item_id, "values")
+            # Determine slot for this row
+            slot = None
+            if hasattr(self, 'assoc_row_to_slot'):
+                slot = self.assoc_row_to_slot.get(item_id)
+            if not slot:
+                # Fallback: try to locate slot by current values
+                slot = 1
+            
+            if column_index == 0:  # Associated Faction ID changed
+                # Update id_slot to new_value
+                field = f"id_{slot}"
+                self.db_manager.execute_update(
+                    f"UPDATE faction_association SET {field} = %s WHERE id = %s",
+                    (int(new_value), int(current_faction_id))
+                )
+                # Also update the displayed faction name
+                name_row = self.db_manager.execute_query("SELECT name FROM faction_list WHERE id = %s", (int(new_value),), fetch_all=False)
+                new_name = name_row['name'] if name_row else 'Unknown'
+                updated = list(values)
+                updated[1] = new_name
+                tree.item(item_id, values=updated)
+            elif column_index == 2:  # Modifier changed
+                field = f"mod_{slot}"
+                self.db_manager.execute_update(
+                    f"UPDATE faction_association SET {field} = %s WHERE id = %s",
+                    (int(new_value), int(current_faction_id))
+                )
+            
+        except Exception as e:
+            messagebox.showerror("Database Error", f"Failed to update association: {e}")
+    
+    def refresh_npcs(self):
+        """Refresh NPC list"""
+        faction_id = self.faction_id_var.get()
+        if faction_id:
+            self.load_faction_npcs(int(faction_id))
+    
+    def show_all_npcs(self):
+        """Show all NPCs regardless of faction"""
+        try:
+            # Clear existing items
+            for item in self.npc_tree.get_children():
+                self.npc_tree.delete(item)
+            
+            query = """
+                SELECT DISTINCT nt.id, nt.name, nt.level, nt.race, nt.class, nt.bodytype, nt.hp, nt.mana,
+                       nt.gender, nt.texture, nt.helmtexture, nt.size, nt.loottable_id, nt.npc_spells_id, nt.npc_faction_id,
+                       nf.name as faction_group_name,
+                       nt.mindmg, nt.maxdmg, nt.npcspecialattks, nt.special_abilities, nt.MR, nt.CR, nt.DR, nt.FR, nt.PR, nt.AC,
+                       nt.attack_delay, nt.STR, nt.STA, nt.DEX, nt.AGI, nt._INT, nt.WIS,
+                       nt.maxlevel, nt.skip_global_loot, nt.exp_mod
+                FROM npc_types nt
+                LEFT JOIN npc_faction nf ON nt.npc_faction_id = nf.id
+                WHERE nt.npc_faction_id IS NOT NULL AND nt.npc_faction_id != 0
+                ORDER BY nt.name
+                LIMIT 1000
+            """
+            npcs = self.db_manager.execute_query(query)
+            
+            for npc in npcs:
+                npc_values = [
+                    npc.get('id'), npc.get('name'), npc.get('level'), npc.get('race'), npc.get('class'),
+                    npc.get('bodytype'), npc.get('hp'), npc.get('mana'), npc.get('gender'), npc.get('texture'),
+                    npc.get('helmtexture'), npc.get('size'), npc.get('loottable_id'), npc.get('npc_spells_id'),
+                    npc.get('npc_faction_id'), npc.get('faction_group_name') or 'Unknown', npc.get('mindmg'), npc.get('maxdmg'),
+                    npc.get('npcspecialattks'), npc.get('special_abilities'), npc.get('MR'), npc.get('CR'), 
+                    npc.get('DR'), npc.get('FR'), npc.get('PR'), npc.get('AC'), npc.get('attack_delay'), 
+                    npc.get('STR'), npc.get('STA'), npc.get('DEX'), npc.get('AGI'), npc.get('_INT'), 
+                    npc.get('WIS'), npc.get('maxlevel'), npc.get('skip_global_loot'), npc.get('exp_mod')
+                ]
+                self.npc_tree.insert("", "end", values=npc_values)
+                
+        except Exception as e:
+            messagebox.showerror("Database Error", f"Failed to load NPCs: {e}")
+    
+    def filter_npcs(self, *args):
+        """Filter NPC list based on search term"""
+        search_term = self.npc_search_var.get().lower()
+        
+        if not search_term:
+            return
+            
+        # Hide items that don't match search
+        for item in self.npc_tree.get_children():
+            values = self.npc_tree.item(item, "values")
+            npc_name = values[1].lower() if len(values) > 1 else ""
+            
+            if search_term in npc_name:
+                self.npc_tree.item(item, tags=())
+            else:
+                self.npc_tree.item(item, tags=("hidden",))
+        
+        # Configure hidden tag
+        self.npc_tree.tag_configure("hidden", background="")
