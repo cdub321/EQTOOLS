@@ -13,3 +13,5 @@
 /tradeskill.py
 /venv
 /__pycache__
+/tools/__pycache__
+/shared/__pycache__
