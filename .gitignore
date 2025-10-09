@@ -12,3 +12,5 @@
 /spell-effect-ids.md
 /tradeskill.py
 /venv
+tools/__pycache__/
+tools/loot_tool1.py

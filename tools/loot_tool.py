@@ -79,7 +79,12 @@ class LootManagerTool:
         ttk.Label(search_frame, text="Enter Zone Shortname:").grid(row=0, column=0, sticky=tk.W)
         self.zone_entry = ttk.Entry(search_frame, width=20)
         self.zone_entry.grid(row=0, column=1, padx=5, pady=5)
-        ttk.Button(search_frame, text="Search Zone", command=self.search_zone).grid(row=0, column=2, padx=5, pady=5)
+        
+        ttk.Label(search_frame, text="Version:").grid(row=0, column=2, sticky=tk.E, padx=(10, 4))
+        self.version_var = tk.StringVar(value="0")
+        self.version_menu = ttk.Combobox(search_frame, textvariable=self.version_var, width=3, state="readonly", values=[str(i) for i in range(6)])
+        self.version_menu.grid(row=0, column=3, padx=4, pady=5, sticky=tk.W)
+        ttk.Button(search_frame, text="Search Zone", command=self.search_zone).grid(row=0, column=4, padx=5, pady=5)
         
         # NPC Name Search
         ttk.Label(search_frame, text="Enter NPC Name:").grid(row=1, column=0, sticky=tk.W)
@@ -394,13 +399,35 @@ class LootManagerTool:
         try:
             unused_loottable_result = self.db_manager.execute_query(unused_loottable_query, fetch_all=False)
             if unused_loottable_result:
-                unused_loottable_ids = [str(unused_loottable_result[0]), str(unused_loottable_result[1]), str(unused_loottable_result[2])]
+                if isinstance(unused_loottable_result, dict):
+                    unused_loottable_ids = [
+                        str(unused_loottable_result.get("next_id", 1)),
+                        str(unused_loottable_result.get("next_id2", 2)),
+                        str(unused_loottable_result.get("next_id3", 3)),
+                    ]
+                else:
+                    unused_loottable_ids = [
+                        str(unused_loottable_result[0]),
+                        str(unused_loottable_result[1]),
+                        str(unused_loottable_result[2]),
+                    ]
             else:
                 unused_loottable_ids = ["1", "2", "3"]
             
             unused_lootdrop_result = self.db_manager.execute_query(unused_lootdrop_query, fetch_all=False)
             if unused_lootdrop_result:
-                unused_lootdrop_ids = [str(unused_lootdrop_result[0]), str(unused_lootdrop_result[1]), str(unused_lootdrop_result[2])]
+                if isinstance(unused_lootdrop_result, dict):
+                    unused_lootdrop_ids = [
+                        str(unused_lootdrop_result.get("next_id", 1)),
+                        str(unused_lootdrop_result.get("next_id2", 2)),
+                        str(unused_lootdrop_result.get("next_id3", 3)),
+                    ]
+                else:
+                    unused_lootdrop_ids = [
+                        str(unused_lootdrop_result[0]),
+                        str(unused_lootdrop_result[1]),
+                        str(unused_lootdrop_result[2]),
+                    ]
             else:
                 unused_lootdrop_ids = ["1", "2", "3"]
         except Exception as e:
@@ -449,6 +476,10 @@ class LootManagerTool:
     def search_zone(self):
         """Search NPCs by zone"""
         zone = self.zone_entry.get().strip()
+        try:
+            version = int(self.version_var.get())
+        except Exception:
+            version = 0
         if not zone:
             return
         
@@ -465,10 +496,10 @@ class LootManagerTool:
             FROM spawn2
             JOIN spawnentry ON spawn2.spawngroupID = spawnentry.spawngroupID
             JOIN npc_types ON spawnentry.npcID = npc_types.id
-            WHERE spawn2.zone = %s
+            WHERE spawn2.zone = %s AND spawn2.version = %s
         """
         
-        npcs = self.db_manager.execute_query(query, (zone,))
+        npcs = self.db_manager.execute_query(query, (zone, version))
         
         for npc in npcs:
             # Convert dictionary to tuple of values ordered by columns
@@ -598,19 +629,34 @@ class LootManagerTool:
         table_data = self.db_manager.execute_query(table_query, (loottable_id,), fetch_all=False)
         
         if table_data:
+            if isinstance(table_data, dict):
+                name = table_data.get("name")
+                mincash = table_data.get("mincash")
+                maxcash = table_data.get("maxcash")
+                avgcoin = table_data.get("avgcoin")
+                min_expansion = table_data.get("min_expansion")
+                max_expansion = table_data.get("max_expansion")
+            else:
+                name = table_data[0]
+                mincash = table_data[1]
+                maxcash = table_data[2]
+                avgcoin = table_data[3]
+                min_expansion = table_data[5]
+                max_expansion = table_data[6]
+
             self.loot_id_var.set(f"Loot Table ID: {loottable_id}")
             self.loottable_name_entry.delete(0, tk.END)
-            self.loottable_name_entry.insert(0, table_data[0] or "")
+            self.loottable_name_entry.insert(0, name or "")
             self.mincash_entry.delete(0, tk.END)
-            self.mincash_entry.insert(0, str(table_data[1] or 0))
+            self.mincash_entry.insert(0, str(mincash or 0))
             self.maxcash_entry.delete(0, tk.END)
-            self.maxcash_entry.insert(0, str(table_data[2] or 0))
+            self.maxcash_entry.insert(0, str(maxcash or 0))
             self.avgcoin_entry.delete(0, tk.END)
-            self.avgcoin_entry.insert(0, str(table_data[3] or 0))
+            self.avgcoin_entry.insert(0, str(avgcoin or 0))
             self.minexpac_entry.delete(0, tk.END)
-            self.minexpac_entry.insert(0, str(table_data[4] or 0))
+            self.minexpac_entry.insert(0, str(min_expansion or 0))
             self.maxexpac_entry.delete(0, tk.END)
-            self.maxexpac_entry.insert(0, str(table_data[5] or 0))
+            self.maxexpac_entry.insert(0, str(max_expansion or 0))
         
         # Load loot drops
         drops_query = """
@@ -623,7 +669,25 @@ class LootManagerTool:
         drops = self.db_manager.execute_query(drops_query, (loottable_id,))
         
         for drop in drops:
-            self.loot_tree.insert("", tk.END, values=drop)
+            if isinstance(drop, dict):
+                drop_values = [
+                    drop.get("lootdrop_id"),
+                    drop.get("name"),
+                    drop.get("multiplier"),
+                    drop.get("mindrop"),
+                    drop.get("droplimit"),
+                    drop.get("probability"),
+                ]
+            else:
+                drop_values = (
+                    drop[0],
+                    drop[1],
+                    drop[2],
+                    drop[4],
+                    drop[3],
+                    drop[5],
+                )
+            self.loot_tree.insert("", tk.END, values=drop_values)
         
         self.current_loottable_id = loottable_id
     
@@ -737,6 +801,11 @@ class LootManagerTool:
             messagebox.showerror("Error", f"Loot drop ID {lootdrop_id} not found")
             return
         
+        if isinstance(result, dict):
+            lootdrop_name = result.get("name", "")
+        else:
+            lootdrop_name = result[1] if len(result) > 1 else ""
+        
         # Check if already linked
         link_check = "SELECT lootdrop_id FROM loottable_entries WHERE loottable_id = %s AND lootdrop_id = %s"
         existing = self.db_manager.execute_query(link_check, (self.current_loottable_id, lootdrop_id), fetch_all=False)
@@ -777,6 +846,11 @@ class LootManagerTool:
             messagebox.showerror("Error", f"Item ID {item_id} not found")
             return
         
+        if isinstance(item_result, dict):
+            item_name = item_result.get("Name", "")
+        else:
+            item_name = item_result[1] if len(item_result) > 1 else ""
+                
         # Check if item already exists in loot drop
         check_query = "SELECT item_id FROM lootdrop_entries WHERE lootdrop_id = %s AND item_id = %s"
         existing = self.db_manager.execute_query(check_query, (self.current_lootdrop_id, item_id), fetch_all=False)
