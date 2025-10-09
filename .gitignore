@@ -12,4 +12,5 @@
 /spell-effect-ids.md
 /tradeskill.py
 /venv
-/tools/__pycache__
+/tools/__pycache__/
+/shared/__pycache__/

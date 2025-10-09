@@ -34,8 +34,8 @@ class LootManagerTool:
         
         # Load initial data safely
         try:
-            # self.setup_notes_db()  # Disabled temporarily
-            # self.find_unused_ids()  # Disabled temporarily
+            self.setup_notes_db()
+            self.find_unused_ids()
             print("Loot tool initialized successfully")
         except Exception as e:
             print(f"Warning: Could not initialize loot tool data: {e}")
@@ -826,7 +826,7 @@ class LootManagerTool:
             # Refresh the loot table display
             self.load_loottable_data(self.current_loottable_id)
             
-            messagebox.showinfo("Success", f"Added loot drop {result[1]} to loot table")
+            messagebox.showinfo("Success", f"Added loot drop {lootdrop_name} to loot table")
             self.lootdrop_id_entry.delete(0, tk.END)
             
         except Exception as e:
@@ -867,7 +867,7 @@ class LootManagerTool:
         
         try:
             self.db_manager.execute_update(insert_query, (self.current_lootdrop_id, item_id))
-            messagebox.showinfo("Success", f"Added item {item_result[1]} to loot drop")
+            messagebox.showinfo("Success", f"Added item {item_name} to loot drop")
             
             # Refresh the loot drop display
             self.on_lootdrop_select(None)
@@ -877,7 +877,73 @@ class LootManagerTool:
     
     def on_lootdrop_select(self, event):
         """Handle loot drop selection"""
-        pass
+        selected_item = self.loot_tree.selection()
+        if not selected_item:
+            return
+
+        lootdrop_values = self.loot_tree.item(selected_item, "values")
+        if not lootdrop_values:
+            return
+
+        lootdrop_id = lootdrop_values[0]
+        if not lootdrop_id:
+            return
+
+        try:
+            self.current_lootdrop_id = int(lootdrop_id)
+        except (TypeError, ValueError):
+            self.current_lootdrop_id = lootdrop_id
+
+        for item in self.loot_tree2.get_children():
+            self.loot_tree2.delete(item)
+
+        entries_query = """
+            SELECT lde.item_id, i.Name AS item_name, lde.item_charges, lde.equip_item, lde.chance,
+                   lde.trivial_min_level, lde.trivial_max_level, lde.multiplier,
+                   lde.npc_min_level, lde.npc_max_level, lde.min_expansion, lde.max_expansion
+            FROM lootdrop_entries lde
+            LEFT JOIN items i ON lde.item_id = i.id
+            WHERE lde.lootdrop_id = %s
+            ORDER BY lde.item_id
+        """
+
+        entries = self.db_manager.execute_query(entries_query, (lootdrop_id,))
+
+        for entry in entries:
+            if isinstance(entry, dict):
+                equip_val = entry.get("equip_item")
+                entry_values = [
+                    entry.get("item_id"),
+                    entry.get("item_name") or entry.get("Name"),
+                    entry.get("item_charges"),
+                    "Yes" if equip_val in (1, True, "1", "Yes") else "No",
+                    entry.get("chance"),
+                    entry.get("trivial_min_level"),
+                    entry.get("trivial_max_level"),
+                    entry.get("multiplier"),
+                    entry.get("npc_min_level"),
+                    entry.get("npc_max_level"),
+                    entry.get("min_expansion"),
+                    entry.get("max_expansion"),
+                ]
+            else:
+                equip_val = entry[3] if len(entry) > 3 else 0
+                entry_values = [
+                    entry[0],
+                    entry[1],
+                    entry[2],
+                    "Yes" if equip_val else "No",
+                    entry[4],
+                    entry[5],
+                    entry[6],
+                    entry[7],
+                    entry[8],
+                    entry[9],
+                    entry[10],
+                    entry[11],
+                ]
+
+            self.loot_tree2.insert("", tk.END, values=entry_values)
     
     def on_loottable_edit(self, event):
         """Handle loot table editing"""
