@@ -2,28 +2,22 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import sys
 import os
+from datetime import datetime
 from PIL import Image, ImageTk
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from typing import Dict, List
+
 from shared.theme import set_dark_theme
-from dictionaries import (CLASS_BITMASK_DISPLAY, RACE_BITMASK_DISPLAY, SLOT_BITMASK_DISPLAY, 
-                         ITEM_STAT_DISPLAY_CONFIG)
-
-# ID to name mappings for display
-CLASS_ID_TO_NAME = {
-    1: "Warrior", 2: "Cleric", 3: "Paladin", 4: "Ranger", 5: "Shadow Knight",
-    6: "Druid", 7: "Monk", 8: "Bard", 9: "Rogue", 10: "Shaman",
-    11: "Necromancer", 12: "Wizard", 13: "Magician", 14: "Enchanter",
-    15: "Beastlord", 16: "Berserker"
-}
-
-RACE_ID_TO_NAME = {
-    1: "Human", 2: "Barbarian", 3: "Erudite", 4: "Wood Elf", 5: "High Elf",
-    6: "Dark Elf", 7: "Half Elf", 8: "Dwarf", 9: "Troll", 10: "Ogre",
-    11: "Halfling", 12: "Gnome", 128: "Iksar", 130: "Vah Shir", 330: "Froglok"
-}
+from shared.notes_db import NotesDBManager
+from dictionaries import (SLOT_BITMASK_DISPLAY, ITEM_STAT_DISPLAY_CONFIG)
+from lookup_data import (
+    class_lookup as CLASS_LOOKUP_SEED,
+    race_lookup as RACE_LOOKUP_SEED,
+    deity_lookup as DEITY_LOOKUP_SEED,
+)
 
 # Slot ID to name mapping for inventory display
 SLOT_ID_TO_NAME = {
@@ -37,11 +31,25 @@ SLOT_ID_TO_NAME = {
 class InventoryManagerTool:
     """Inventory Manager Tool - modular version for tabbed interface"""
     
-    def __init__(self, parent_frame, db_manager):
+    def __init__(self, parent_frame, db_manager, notes_db_manager: NotesDBManager):
         self.parent = parent_frame
         self.db_manager = db_manager
         self.conn = db_manager.connect()
         self.cursor = db_manager.get_cursor()
+        if not isinstance(notes_db_manager, NotesDBManager):
+            raise ValueError("InventoryManagerTool requires a NotesDBManager instance")
+
+        self.notes_db: NotesDBManager = notes_db_manager
+        # Lookup caches
+        self.class_id_to_name = {}
+        self.class_name_to_id = {}
+        self.class_bitmask_display = {}
+        self.race_id_to_name = {}
+        self.race_name_to_id = {}
+        self.race_bitmask_display = {}
+        self.deity_id_to_name = {}
+        self.deity_name_to_id = {}
+        self.load_lookup_data()
         
         # Sorting variables
         self.sort_column = None
@@ -60,6 +68,45 @@ class InventoryManagerTool:
         
         # Load initial data
         self.load_players()
+
+    def load_lookup_data(self):
+        """Load class, race, and deity lookup data from notes.db with seed fallbacks."""
+
+        def with_fallback(fetch_fn, seed_map: Dict[int, Dict[str, str]], entity: str) -> List[Dict]:
+            try:
+                rows = fetch_fn()
+            except Exception as exc:
+                print(f"Warning: failed to load {entity} from notes.db ({exc}); falling back to seed data.")
+                rows = []
+
+            if not rows:
+                rows = [
+                    {'id': seed_id, **data}
+                    for seed_id, data in seed_map.items()
+                ]
+            return rows
+
+        class_rows = with_fallback(self.notes_db.get_class_bitmasks, CLASS_LOOKUP_SEED, "class lookup")
+        self.class_id_to_name = {row['id']: row['name'] for row in class_rows}
+        self.class_name_to_id = {name: class_id for class_id, name in self.class_id_to_name.items()}
+        self.class_bitmask_display = {
+            row['bit_value']: row.get('abbr') or row['name']
+            for row in class_rows
+        }
+        self.class_bitmask_display[65535] = "ALL"
+
+        race_rows = with_fallback(self.notes_db.get_race_bitmasks, RACE_LOOKUP_SEED, "race lookup")
+        self.race_id_to_name = {row['id']: row['name'] for row in race_rows}
+        self.race_name_to_id = {name: race_id for race_id, name in self.race_id_to_name.items()}
+        self.race_bitmask_display = {
+            row['bit_value']: row.get('abbr') or row['name']
+            for row in race_rows
+        }
+        self.race_bitmask_display[65535] = "ALL"
+
+        deity_rows = with_fallback(self.notes_db.get_deity_bitmasks, DEITY_LOOKUP_SEED, "deity lookup")
+        self.deity_id_to_name = {row['id']: row['name'] for row in deity_rows}
+        self.deity_name_to_id = {name: deity_id for deity_id, name in self.deity_id_to_name.items()}
     
     def create_ui(self):
         """Create the complete Inventory Manager UI"""
@@ -111,8 +158,8 @@ class InventoryManagerTool:
         warning_label.grid(row=0, column=2, padx=5)
 
         # Player list treeview
-        player_columns = ["ID", "Name", "Level", "Class", "Race", "Zone", "Time\nPlayed", "AA\nSpent", "AA\nPoints", 
-                         "Plat", "Gold", "Plat\nBank", "Gold\nBank", "Plat\nCursor", "Gold\nCursor", "Shared\nItems"]
+        player_columns = ["ID", "Name", "Level", "Class", "Race", "Zone", "Time\nPlayed", "AA\nSpent", "AA\nPoints",
+                         "Plat", "Plat\nBank", "Plat\nCursor", "Shared\nItems"]
         self.player_tree = ttk.Treeview(self.left_panel, columns=player_columns, show="headings", selectmode="browse")
 
         # Set column headings and widths
@@ -127,11 +174,8 @@ class InventoryManagerTool:
             "AA\nSpent": 50,
             "AA\nPoints": 50,
             "Plat": 40,
-            "Gold": 40,
             "Plat\nBank": 40,
-            "Gold\nBank": 40,
             "Plat\nCursor": 50,
-            "Gold\nCursor": 50,
             "Shared\nItems": 60
         }
         
@@ -147,9 +191,30 @@ class InventoryManagerTool:
         middle_label = ttk.Label(self.middle_panel, text="Inventory", font=("Arial", 12, "bold"))
         middle_label.grid(row=0, column=0, pady=5)
         
-        # Create notebook for different inventory sections
-        self.inventory_notebook = ttk.Notebook(self.middle_panel)
-        self.inventory_notebook.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        # Create notebook for different inventory sections with action button on the same row
+        notebook_container = ttk.Frame(self.middle_panel)
+        notebook_container.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        notebook_container.grid_rowconfigure(0, weight=1)
+        notebook_container.grid_columnconfigure(0, weight=1)
+
+        style = ttk.Style(self.middle_panel)
+        style.configure("InventoryDelete.TButton", foreground="white", background="#b22222")
+        style.map(
+            "InventoryDelete.TButton",
+            background=[("active", "#dc143c"), ("pressed", "#8b0000")],
+            foreground=[("disabled", "#aaaaaa")]
+        )
+
+        self.inventory_notebook = ttk.Notebook(notebook_container)
+        self.inventory_notebook.grid(row=0, column=0, sticky="nsew")
+
+        delete_button = ttk.Button(
+            notebook_container,
+            text="Delete Selected Item",
+            command=self.delete_selected_item,
+            style="InventoryDelete.TButton"
+        )
+        delete_button.grid(row=0, column=0, padx=(8, 0), sticky="ne")
 
         # Worn equipment tab
         worn_frame = ttk.Frame(self.inventory_notebook)
@@ -194,39 +259,70 @@ class InventoryManagerTool:
     def create_right_panel(self):
         # Right Panel - Character Details
         right_label = ttk.Label(self.right_panel, text="Character Details", font=("Arial", 12, "bold"))
-        right_label.grid(row=0, column=0, pady=5)
+        right_label.grid(row=0, column=0, pady=1)
 
         # Create a frame to hold all character details
         char_details_container = ttk.Frame(self.right_panel)
-        char_details_container.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        char_details_container.grid(row=1, column=0, sticky="nsew", padx=5, pady=0)
         char_details_container.grid_rowconfigure(0, weight=1)
         char_details_container.grid_columnconfigure(0, weight=1)
 
         # Character info frame
         char_info_frame = ttk.LabelFrame(char_details_container, text="Basic Info")
-        char_info_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        char_info_frame.grid(row=0, column=0, sticky="ew", padx=2, pady=2)
 
-        # Character info labels
+        # Character info labels - organized in 3 columns for compactness
         self.char_info_labels = {}
-        char_info_fields = ["Name", "Level", "Class", "Race", "Deity", "Guild", "Last Login", "Time Played", 
-                           "HP", "Mana", "Endurance", "STR", "STA", "CHA", "DEX", "INT", "AGI", "WIS"]
+        char_info_fields = [
+            # Column 1
+            ["Name", "Level", "Class", "Race", "Deity", "Guild"],
+            # Column 2
+            ["Last Login", "Time Played", "HP", "Mana", "Endurance", ""],
+            # Column 3
+            ["STR", "STA", "DEX", "AGI", "INT", "WIS", "CHA"]
+        ]
 
-        for i, field in enumerate(char_info_fields):
-            frame = ttk.Frame(char_info_frame)
-            frame.grid(row=i, column=0, sticky="ew", padx=5, pady=2)
-            frame.grid_columnconfigure(1, weight=1)
-            
-            label = ttk.Label(frame, text=f"{field}:", width=15, anchor="w")
-            label.grid(row=0, column=0, sticky="w")
-            
-            value = ttk.Label(frame, text="", anchor="w")
-            value.grid(row=0, column=1, sticky="ew")
-            
-            self.char_info_labels[field] = value
+        # Define custom widths for labels and values based on field type
+        field_widths = {
+            # Format: field_name: (label_width, value_width)
+            # Stats (3 digit numbers)
+            "STR": (4, 4), "STA": (4, 4), "DEX": (4, 4), "AGI": (4, 4),
+            "INT": (4, 4), "WIS": (4, 4), "CHA": (4, 4),
+            # Small numbers
+            "Level": (6, 4),
+            "HP": (6, 6), "Mana": (6, 6), "Endurance": (6, 6),
+            # Text fields (wider)
+            "Name": (6, 15),
+            "Class": (6, 12),
+            "Race": (6, 10),
+            "Deity": (6, 15),
+            "Guild": (6, 20),
+            "Last Login": (10, 20),
+            "Time Played": (10, 10),
+        }
+
+        for col_idx, column_fields in enumerate(char_info_fields):
+            for row_idx, field in enumerate(column_fields):
+                if field == "":  # Skip empty placeholders
+                    continue
+
+                frame = ttk.Frame(char_info_frame)
+                frame.grid(row=row_idx, column=col_idx, sticky="ew", padx=2, pady=0)
+
+                # Get custom widths or use defaults
+                label_width, value_width = field_widths.get(field, (8, 12))
+
+                label = ttk.Label(frame, text=f"{field}:", width=label_width, anchor="w")
+                label.grid(row=0, column=0, sticky="w")
+
+                value = ttk.Label(frame, text="", anchor="w", width=value_width)
+                value.grid(row=0, column=1, sticky="w")
+
+                self.char_info_labels[field] = value
 
         # Item details frame - sophisticated item display like loot tool
         item_details_frame = ttk.LabelFrame(char_details_container, text="Item Details")
-        item_details_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+        item_details_frame.grid(row=1, column=0, sticky="ew", padx=2, pady=2)
 
         # Canvas for item display with background image
         try:
@@ -244,7 +340,7 @@ class InventoryManagerTool:
 
         # Character buffs frame
         buffs_frame = ttk.LabelFrame(char_details_container, text="Active Buffs")
-        buffs_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
+        buffs_frame.grid(row=2, column=0, sticky="nsew", padx=2, pady=2)
         buffs_frame.grid_rowconfigure(0, weight=1)
         buffs_frame.grid_columnconfigure(0, weight=1)
 
@@ -263,10 +359,6 @@ class InventoryManagerTool:
 
         # Add buffs tree to grid
         self.buffs_tree.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-
-        # Add delete button
-        delete_button = ttk.Button(self.middle_panel, text="Delete Selected Item", command=self.delete_selected_item)
-        delete_button.grid(row=2, column=0, pady=5)
         
         # Bind events
         self.player_tree.bind("<<TreeviewSelect>>", self.load_inventory)
@@ -283,33 +375,33 @@ class InventoryManagerTool:
         
         # Fetch players from character_data - exclude level 0, deleted chars, and empty inventories
         query = """
-            SELECT DISTINCT cd.id, cd.name, cd.level, 
+            SELECT DISTINCT cd.id, cd.name, cd.level,
                    CASE cd.class
-                       WHEN 1 THEN 'Warrior' WHEN 2 THEN 'Cleric' WHEN 3 THEN 'Paladin' WHEN 4 THEN 'Ranger' 
-                       WHEN 5 THEN 'Shadow Knight' WHEN 6 THEN 'Druid' WHEN 7 THEN 'Monk' WHEN 8 THEN 'Bard' 
-                       WHEN 9 THEN 'Rogue' WHEN 10 THEN 'Shaman' WHEN 11 THEN 'Necromancer' WHEN 12 THEN 'Wizard' 
+                       WHEN 1 THEN 'Warrior' WHEN 2 THEN 'Cleric' WHEN 3 THEN 'Paladin' WHEN 4 THEN 'Ranger'
+                       WHEN 5 THEN 'Shadow Knight' WHEN 6 THEN 'Druid' WHEN 7 THEN 'Monk' WHEN 8 THEN 'Bard'
+                       WHEN 9 THEN 'Rogue' WHEN 10 THEN 'Shaman' WHEN 11 THEN 'Necromancer' WHEN 12 THEN 'Wizard'
                        WHEN 13 THEN 'Magician' WHEN 14 THEN 'Enchanter' WHEN 15 THEN 'Beastlord' WHEN 16 THEN 'Berserker'
                        ELSE CONCAT('Unknown (', cd.class, ')') END as class,
                    CASE cd.race
-                       WHEN 1 THEN 'Human' WHEN 2 THEN 'Barbarian' WHEN 3 THEN 'Erudite' WHEN 4 THEN 'Wood Elf' 
-                       WHEN 5 THEN 'High Elf' WHEN 6 THEN 'Dark Elf' WHEN 7 THEN 'Half Elf' WHEN 8 THEN 'Dwarf' 
-                       WHEN 9 THEN 'Troll' WHEN 10 THEN 'Ogre' WHEN 11 THEN 'Halfling' WHEN 12 THEN 'Gnome' 
+                       WHEN 1 THEN 'Human' WHEN 2 THEN 'Barbarian' WHEN 3 THEN 'Erudite' WHEN 4 THEN 'Wood Elf'
+                       WHEN 5 THEN 'High Elf' WHEN 6 THEN 'Dark Elf' WHEN 7 THEN 'Half Elf' WHEN 8 THEN 'Dwarf'
+                       WHEN 9 THEN 'Troll' WHEN 10 THEN 'Ogre' WHEN 11 THEN 'Halfling' WHEN 12 THEN 'Gnome'
                        WHEN 128 THEN 'Iksar' WHEN 130 THEN 'Vah Shir' WHEN 330 THEN 'Froglok'
                        ELSE CONCAT('Unknown (', cd.race, ')') END as race,
                    cd.zone_id, cd.time_played, cd.aa_points_spent, cd.aa_points,
-                   COALESCE(cc.platinum, 0) as platinum, COALESCE(cc.gold, 0) as gold,
-                   COALESCE(cc.platinum_bank, 0) as platinum_bank, COALESCE(cc.gold_bank, 0) as gold_bank,
-                   COALESCE(cc.platinum_cursor, 0) as platinum_cursor, COALESCE(cc.gold_cursor, 0) as gold_cursor,
+                   COALESCE(cc.platinum, 0) as platinum,
+                   COALESCE(cc.platinum_bank, 0) as platinum_bank,
+                   COALESCE(cc.platinum_cursor, 0) as platinum_cursor,
                    COUNT(DISTINCT sb.item_id) as shared_items_count
             FROM character_data cd
             INNER JOIN inventory i ON cd.id = i.character_id
             LEFT JOIN character_currency cc ON cd.id = cc.id
             LEFT JOIN sharedbank sb ON cd.account_id = sb.account_id AND sb.item_id > 0
-            WHERE cd.level > 0 
+            WHERE cd.level > 0
                 AND cd.name NOT LIKE '%%-deleted%%'
                 AND i.item_id > 0
-            GROUP BY cd.id, cd.name, cd.level, cd.class, cd.race, cd.zone_id, cd.time_played, 
-                     cd.aa_points_spent, cd.aa_points, cc.platinum, cc.gold, cc.platinum_bank, cc.gold_bank, cc.platinum_cursor, cc.gold_cursor
+            GROUP BY cd.id, cd.name, cd.level, cd.class, cd.race, cd.zone_id, cd.time_played,
+                     cd.aa_points_spent, cd.aa_points, cc.platinum, cc.platinum_bank, cc.platinum_cursor
             ORDER BY cd.name
         """
         players = self.db_manager.execute_query(query)
@@ -318,12 +410,16 @@ class InventoryManagerTool:
         for player in players:
             # Convert dictionary to tuple of values ordered by columns
             if isinstance(player, dict):
+                # Get zone name from zone_id
+                zone_id = player.get('zone_id')
+                zone_info = self.notes_db.get_zone_by_id(zone_id)
+                zone_name = zone_info['long_name'] if zone_info else f"Zone {zone_id}"
+
                 # Extract values in the same order as the treeview columns
                 player_values = [
                     player.get('id'), player.get('name'), player.get('level'), player.get('class'), player.get('race'),
-                    player.get('zone_id'), player.get('time_played'), player.get('aa_points_spent'), player.get('aa_points'),
-                    player.get('platinum'), player.get('gold'), player.get('platinum_bank'), player.get('gold_bank'),
-                    player.get('platinum_cursor'), player.get('gold_cursor'),
+                    zone_name, player.get('time_played'), player.get('aa_points_spent'), player.get('aa_points'),
+                    player.get('platinum'), player.get('platinum_bank'), player.get('platinum_cursor'),
                     player.get('shared_items_count', 0)
                 ]
                 self.player_tree.insert("", tk.END, values=player_values)
@@ -343,34 +439,34 @@ class InventoryManagerTool:
         
         # Fetch players from character_data - exclude level 0, deleted chars, and empty inventories
         query = """
-            SELECT DISTINCT cd.id, cd.name, cd.level, 
+            SELECT DISTINCT cd.id, cd.name, cd.level,
                    CASE cd.class
-                       WHEN 1 THEN 'Warrior' WHEN 2 THEN 'Cleric' WHEN 3 THEN 'Paladin' WHEN 4 THEN 'Ranger' 
-                       WHEN 5 THEN 'Shadow Knight' WHEN 6 THEN 'Druid' WHEN 7 THEN 'Monk' WHEN 8 THEN 'Bard' 
-                       WHEN 9 THEN 'Rogue' WHEN 10 THEN 'Shaman' WHEN 11 THEN 'Necromancer' WHEN 12 THEN 'Wizard' 
+                       WHEN 1 THEN 'Warrior' WHEN 2 THEN 'Cleric' WHEN 3 THEN 'Paladin' WHEN 4 THEN 'Ranger'
+                       WHEN 5 THEN 'Shadow Knight' WHEN 6 THEN 'Druid' WHEN 7 THEN 'Monk' WHEN 8 THEN 'Bard'
+                       WHEN 9 THEN 'Rogue' WHEN 10 THEN 'Shaman' WHEN 11 THEN 'Necromancer' WHEN 12 THEN 'Wizard'
                        WHEN 13 THEN 'Magician' WHEN 14 THEN 'Enchanter' WHEN 15 THEN 'Beastlord' WHEN 16 THEN 'Berserker'
                        ELSE CONCAT('Unknown (', cd.class, ')') END as class,
                    CASE cd.race
-                       WHEN 1 THEN 'Human' WHEN 2 THEN 'Barbarian' WHEN 3 THEN 'Erudite' WHEN 4 THEN 'Wood Elf' 
-                       WHEN 5 THEN 'High Elf' WHEN 6 THEN 'Dark Elf' WHEN 7 THEN 'Half Elf' WHEN 8 THEN 'Dwarf' 
-                       WHEN 9 THEN 'Troll' WHEN 10 THEN 'Ogre' WHEN 11 THEN 'Halfling' WHEN 12 THEN 'Gnome' 
+                       WHEN 1 THEN 'Human' WHEN 2 THEN 'Barbarian' WHEN 3 THEN 'Erudite' WHEN 4 THEN 'Wood Elf'
+                       WHEN 5 THEN 'High Elf' WHEN 6 THEN 'Dark Elf' WHEN 7 THEN 'Half Elf' WHEN 8 THEN 'Dwarf'
+                       WHEN 9 THEN 'Troll' WHEN 10 THEN 'Ogre' WHEN 11 THEN 'Halfling' WHEN 12 THEN 'Gnome'
                        WHEN 128 THEN 'Iksar' WHEN 130 THEN 'Vah Shir' WHEN 330 THEN 'Froglok'
                        ELSE CONCAT('Unknown (', cd.race, ')') END as race,
                    cd.zone_id, cd.time_played, cd.aa_points_spent, cd.aa_points,
-                   COALESCE(cc.platinum, 0) as platinum, COALESCE(cc.gold, 0) as gold,
-                   COALESCE(cc.platinum_bank, 0) as platinum_bank, COALESCE(cc.gold_bank, 0) as gold_bank,
-                   COALESCE(cc.platinum_cursor, 0) as platinum_cursor, COALESCE(cc.gold_cursor, 0) as gold_cursor,
+                   COALESCE(cc.platinum, 0) as platinum,
+                   COALESCE(cc.platinum_bank, 0) as platinum_bank,
+                   COALESCE(cc.platinum_cursor, 0) as platinum_cursor,
                    COUNT(DISTINCT sb.item_id) as shared_items_count
             FROM character_data cd
             INNER JOIN inventory i ON cd.id = i.character_id
             LEFT JOIN character_currency cc ON cd.id = cc.id
             LEFT JOIN sharedbank sb ON cd.account_id = sb.account_id AND sb.item_id > 0
-            WHERE cd.level > 0 
+            WHERE cd.level > 0
                 AND cd.name NOT LIKE '%%-deleted%%'
                 AND i.item_id > 0
                 AND LOWER(cd.name) LIKE %s
-            GROUP BY cd.id, cd.name, cd.level, cd.class, cd.race, cd.zone_id, cd.time_played, 
-                     cd.aa_points_spent, cd.aa_points, cc.platinum, cc.gold, cc.platinum_bank, cc.gold_bank, cc.platinum_cursor, cc.gold_cursor
+            GROUP BY cd.id, cd.name, cd.level, cd.class, cd.race, cd.zone_id, cd.time_played,
+                     cd.aa_points_spent, cd.aa_points, cc.platinum, cc.platinum_bank, cc.platinum_cursor
             ORDER BY cd.name
         """
         players = self.db_manager.execute_query(query, (f"%{search_term}%",))
@@ -379,12 +475,16 @@ class InventoryManagerTool:
         for player in players:
             # Convert dictionary to tuple of values ordered by columns
             if isinstance(player, dict):
+                # Get zone name from zone_id
+                zone_id = player.get('zone_id')
+                zone_info = self.notes_db.get_zone_by_id(zone_id)
+                zone_name = zone_info['long_name'] if zone_info else f"Zone {zone_id}"
+
                 # Extract values in the same order as the treeview columns
                 player_values = [
                     player.get('id'), player.get('name'), player.get('level'), player.get('class'), player.get('race'),
-                    player.get('zone_id'), player.get('time_played'), player.get('aa_points_spent'), player.get('aa_points'),
-                    player.get('platinum'), player.get('gold'), player.get('platinum_bank'), player.get('gold_bank'),
-                    player.get('platinum_cursor'), player.get('gold_cursor'),
+                    zone_name, player.get('time_played'), player.get('aa_points_spent'), player.get('aa_points'),
+                    player.get('platinum'), player.get('platinum_bank'), player.get('platinum_cursor'),
                     player.get('shared_items_count', 0)
                 ]
                 self.player_tree.insert("", tk.END, values=player_values)
@@ -482,8 +582,8 @@ class InventoryManagerTool:
     def validate_cell_data(self, column, value):
         """Validate and convert cell data based on column type"""
         # Numeric columns
-        numeric_columns = ["Level", "Zone", "Time\nPlayed", "AA\nSpent", "AA\nPoints", 
-                          "Plat", "Gold", "Plat\nBank", "Gold\nBank", "Plat\nCursor", "Gold\nCursor"]
+        numeric_columns = ["Level", "Zone", "Time\nPlayed", "AA\nSpent", "AA\nPoints",
+                          "Plat", "Plat\nBank", "Plat\nCursor"]
         
         if column in numeric_columns:
             try:
@@ -501,14 +601,14 @@ class InventoryManagerTool:
         
         # Class validation
         elif column == "Class":
-            class_names = list(CLASS_ID_TO_NAME.values())
+            class_names = list(self.class_id_to_name.values())
             if value not in class_names:
                 raise ValueError(f"Class must be one of: {', '.join(class_names)}")
             return value
         
         # Race validation  
         elif column == "Race":
-            race_names = list(RACE_ID_TO_NAME.values())
+            race_names = list(self.race_id_to_name.values())
             if value not in race_names:
                 raise ValueError(f"Race must be one of: {', '.join(race_names)}")
             return value
@@ -521,19 +621,16 @@ class InventoryManagerTool:
             # Map display column names to database column names
             column_mapping = {
                 "Name": "name",
-                "Level": "level", 
+                "Level": "level",
                 "Class": "class",
                 "Race": "race",
                 "Zone": "zone_id",
                 "Time\nPlayed": "time_played",
-                "AA\nSpent": "aa_points_spent", 
+                "AA\nSpent": "aa_points_spent",
                 "AA\nPoints": "aa_points",
                 "Plat": "platinum",
-                "Gold": "gold",
                 "Plat\nBank": "platinum_bank",
-                "Gold\nBank": "gold_bank",
-                "Plat\nCursor": "platinum_cursor",
-                "Gold\nCursor": "gold_cursor"
+                "Plat\nCursor": "platinum_cursor"
             }
             
             db_column = column_mapping.get(column)
@@ -541,31 +638,21 @@ class InventoryManagerTool:
                 return False
             
             # Determine which table to update
-            if db_column in ["platinum", "gold", "platinum_bank", "gold_bank", "platinum_cursor", "gold_cursor"]:
+            if db_column in ["platinum", "platinum_bank", "platinum_cursor"]:
                 # Update character_currency table
                 table = "character_currency"
                 where_column = "id"
-                
-                # For class and race, we need to convert names back to IDs
-                if column == "Class":
-                    name_to_id = {v: k for k, v in CLASS_ID_TO_NAME.items()}
-                    value = name_to_id[value]
-                elif column == "Race":
-                    name_to_id = {v: k for k, v in RACE_ID_TO_NAME.items()}
-                    value = name_to_id[value]
-                    
+
             else:
                 # Update character_data table
                 table = "character_data"
                 where_column = "id"
-                
+
                 # For class and race, we need to convert names back to IDs
                 if column == "Class":
-                    name_to_id = {v: k for k, v in CLASS_ID_TO_NAME.items()}
-                    value = name_to_id[value]
+                    value = self.class_name_to_id.get(value, value)
                 elif column == "Race":
-                    name_to_id = {v: k for k, v in RACE_ID_TO_NAME.items()}
-                    value = name_to_id[value]
+                    value = self.race_name_to_id.get(value, value)
             
             # Execute update query
             query = f"UPDATE {table} SET {db_column} = %s WHERE {where_column} = %s"
@@ -590,9 +677,8 @@ class InventoryManagerTool:
         items = [(self.player_tree.set(child, col), child) for child in self.player_tree.get_children('')]
         
         # Sort items - handle numeric columns specially
-        numeric_columns = ["ID", "Level", "Zone", "Time\nPlayed", "AA\nSpent", "AA\nPoints", 
-                          "Plat", "Gold", "Plat\nBank", "Gold\nBank", "Plat\nCursor", "Gold\nCursor", 
-                          "Shared\nItems"]
+        numeric_columns = ["ID", "Level", "Zone", "Time\nPlayed", "AA\nSpent", "AA\nPoints",
+                          "Plat", "Plat\nBank", "Plat\nCursor", "Shared\nItems"]
         # Class and Race are now text columns, so they'll be sorted alphabetically
         
         if col in numeric_columns:
@@ -760,21 +846,26 @@ class InventoryManagerTool:
                     # Apply formatting for specific fields
                     if field == "Class":
                         # Convert class ID to name
-                        class_names = {
-                            1: "Warrior", 2: "Cleric", 3: "Paladin", 4: "Ranger", 5: "Shadow Knight",
-                            6: "Druid", 7: "Monk", 8: "Bard", 9: "Rogue", 10: "Shaman",
-                            11: "Necromancer", 12: "Wizard", 13: "Magician", 14: "Enchanter",
-                            15: "Beastlord", 16: "Berserker"
-                        }
-                        value = class_names.get(value, f"Unknown ({value})")
+                        if isinstance(value, int):
+                            value = self.class_id_to_name.get(value, f"Unknown ({value})")
                     elif field == "Race":
                         # Convert race ID to name
-                        race_names = {
-                            1: "Human", 2: "Barbarian", 3: "Erudite", 4: "Wood Elf", 5: "High Elf",
-                            6: "Dark Elf", 7: "Half Elf", 8: "Dwarf", 9: "Troll", 10: "Ogre",
-                            11: "Halfling", 12: "Gnome", 128: "Iksar", 130: "Vah Shir", 330: "Froglok"
-                        }
-                        value = race_names.get(value, f"Unknown ({value})")
+                        if isinstance(value, int):
+                            value = self.race_id_to_name.get(value, f"Unknown ({value})")
+                    elif field == "Deity":
+                        # Convert deity ID to name
+                        if isinstance(value, int):
+                            value = self.deity_id_to_name.get(value, f"Unknown ({value})")
+                    elif field == "Last Login":
+                        # Format Unix timestamp to readable date/time
+                        if value and value != "Unknown" and isinstance(value, int):
+                            try:
+                                dt = datetime.fromtimestamp(value)
+                                value = dt.strftime("%Y-%m-%d %H:%M")
+                            except (ValueError, OSError):
+                                value = "Unknown"
+                        else:
+                            value = "Unknown"
                     elif field == "Time Played":
                         # Format time played (in seconds)
                         if value and value != "Unknown":
@@ -820,6 +911,9 @@ class InventoryManagerTool:
     def display_item_details(self, event=None):
         """CRITICAL: Handle item selection and display stats on image overlay - EXACT COPY from loot tool"""
         # Determine which treeview triggered the event
+        if not event:
+            return
+
         if event.widget == self.worn_tree:
             tree = self.worn_tree
         elif event.widget == self.bagged_tree:
@@ -853,29 +947,10 @@ class InventoryManagerTool:
             FROM items
             WHERE id = %s
         """
-        self.cursor.execute(query, (item_id,))
-        item_data = self.cursor.fetchone()
+        item_data = self.db_manager.execute_query(query, (item_id,), fetch_all=False)
         
         if item_data:
-            # Create item_stats dictionary from item_data
-            columns = [
-                "Name", "aagi", "ac", "accuracy", "acha", "adex", "aint", "asta", "astr", "attack", "augrestrict",  
-                "augtype", "avoidance", "awis", "bagsize", "bagslots", "bagtype", "bagwr", "banedmgamt", "banedmgraceamt", 
-                "banedmgbody", "banedmgrace", "classes", "color", "combateffects", "extradmgskill", "extradmgamt", "cr", "damage", 
-                "damageshield", "deity", "delay", "dotshielding", "dr", "elemdmgtype", "elemdmgamt", "endur", "fr", "fvnodrop", 
-                "haste", "hp", "regen", "icon", "itemclass", "itemtype", "lore", "loregroup", "magic", "mana", "manaregen", "enduranceregen", "mr", "nodrop", "norent", "pr", "races", 
-                "range", "reclevel", "recskill", "reqlevel", "shielding", "size", "skillmodtype", "skillmodvalue", 
-                "slots", "clickeffect", "spellshield", "strikethrough", "stunresist", "weight", "attuneable", "svcorruption", "skillmodmax",
-                "heroic_str", "heroic_int", "heroic_wis", "heroic_agi", "heroic_dex", 
-                "heroic_sta", "heroic_cha", "heroic_pr", "heroic_dr", "heroic_fr", 
-                "heroic_cr", "heroic_mr", "heroic_svcorrup", "healamt", "spelldmg", "clairvoyance", "backstabdmg"
-            ]
-            
-            # Handle both dict and tuple results
-            if isinstance(item_data, dict):
-                item_stats = item_data
-            else:
-                item_stats = dict(zip(columns, item_data))
+            item_stats = dict(item_data)
             
             # Handle icon - display item image
             icon_id = item_stats.get("icon")
@@ -904,10 +979,11 @@ class InventoryManagerTool:
                 if classes_bitmask == 65535:
                     item_stats["classes"] = "ALL"
                 else:
-                    class_names = []
-                    for bit_value, class_name in CLASS_BITMASK_DISPLAY.items():
-                        if bit_value != 65535 and classes_bitmask & bit_value:
-                            class_names.append(class_name)
+                    class_names = [
+                        class_name
+                        for bit_value, class_name in self.class_bitmask_display.items()
+                        if bit_value != 65535 and classes_bitmask & bit_value
+                    ]
                     item_stats["classes"] = ", ".join(class_names)
             
             # Handle races bitmask using centralized dictionary
@@ -920,10 +996,11 @@ class InventoryManagerTool:
                 if races_bitmask == 65535:
                     item_stats["races"] = "ALL"
                 else:
-                    race_names = []
-                    for bit_value, race_name in RACE_BITMASK_DISPLAY.items():
-                        if bit_value != 65535 and races_bitmask & bit_value:
-                            race_names.append(race_name)
+                    race_names = [
+                        race_name
+                        for bit_value, race_name in self.race_bitmask_display.items()
+                        if bit_value != 65535 and races_bitmask & bit_value
+                    ]
                     item_stats["races"] = ", ".join(race_names)
     
             # Handle item slots bitmask using centralized dictionary

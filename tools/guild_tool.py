@@ -7,8 +7,55 @@ from datetime import datetime
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from typing import Dict, List
+
 from shared.theme import set_dark_theme
-from dictionaries import RACE_BITMASK_DISPLAY, CLASS_BITMASK_DISPLAY
+
+
+class _TreeviewScrollMixin:
+    """Provide invisible scrollbar behaviour for scrollable widgets."""
+
+    @staticmethod
+    def _make_treeview_invisible_scroll(tree):
+        _TreeviewScrollMixin._make_widget_invisible_scroll(tree, allow_horizontal=True)
+
+    @staticmethod
+    def _make_widget_invisible_scroll(widget, allow_horizontal: bool = False):
+        configure_kwargs = {}
+        if hasattr(widget, "yview"):
+            configure_kwargs["yscrollcommand"] = lambda *args: None
+        if allow_horizontal and hasattr(widget, "xview"):
+            configure_kwargs["xscrollcommand"] = lambda *args: None
+        if configure_kwargs:
+            widget.configure(**configure_kwargs)
+
+        def _on_mousewheel(event, horizontal=False):
+            delta = event.delta
+            if delta == 0:
+                num = getattr(event, "num", 0)
+                delta = 120 if num == 4 else -120
+            direction = -1 if delta > 0 else 1
+            try:
+                if horizontal and allow_horizontal and hasattr(widget, "xview_scroll"):
+                    widget.xview_scroll(direction, "units")
+                elif hasattr(widget, "yview_scroll"):
+                    widget.yview_scroll(direction, "units")
+            except tk.TclError:
+                pass
+            return "break"
+
+        widget.bind("<MouseWheel>", lambda event: _on_mousewheel(event))
+        widget.bind("<Button-4>", lambda event: _on_mousewheel(event))
+        widget.bind("<Button-5>", lambda event: _on_mousewheel(event))
+        if allow_horizontal:
+            widget.bind("<Shift-MouseWheel>", lambda event: _on_mousewheel(event, horizontal=True))
+            widget.bind("<Shift-Button-4>", lambda event: _on_mousewheel(event, horizontal=True))
+            widget.bind("<Shift-Button-5>", lambda event: _on_mousewheel(event, horizontal=True))
+from shared.notes_db import NotesDBManager
+from lookup_data import (
+    race_lookup as RACE_LOOKUP_SEED,
+    class_lookup as CLASS_LOOKUP_SEED,
+)
 
 class TreeviewEdit:
     """Cell editing functionality for Treeview widgets"""
@@ -92,14 +139,22 @@ class TreeviewEdit:
         self.editing = False
         self.edit_cell = None
 
-class GuildManagerTool:
+class GuildManagerTool(_TreeviewScrollMixin):
     """Guild Manager Tool - modular version for tabbed interface"""
     
-    def __init__(self, parent_frame, db_manager):
+    def __init__(self, parent_frame, db_manager, notes_db_manager: NotesDBManager):
         self.parent = parent_frame
         self.db_manager = db_manager
         self.conn = db_manager.connect()
         self.cursor = db_manager.get_cursor()
+        if not isinstance(notes_db_manager, NotesDBManager):
+            raise ValueError("GuildManagerTool requires a NotesDBManager instance")
+        self.notes_db: NotesDBManager = notes_db_manager
+        self.race_display_by_id = {}
+        self.class_display_by_id = {}
+        self.class_bitmask_display = {}
+        self.race_bitmask_display = {}
+        self.load_lookup_data()
         
         # Configure parent frame grid
         self.parent.grid_rowconfigure(0, weight=1)
@@ -122,6 +177,44 @@ class GuildManagerTool:
             print("Guild tool initialized successfully")
         except Exception as e:
             print(f"Warning: Could not initialize guild tool data: {e}")
+
+    def load_lookup_data(self):
+        """Load race and class displays from notes.db with seed fallback."""
+        def with_fallback(fetcher, seed, label: str) -> List[Dict]:
+            try:
+                rows = fetcher()
+            except Exception as exc:
+                print(f"Warning: failed to load {label} from notes.db ({exc}); using seed data.")
+                rows = []
+            if not rows:
+                rows = [{'id': key, **data} for key, data in seed.items()]
+            return rows
+
+        class_rows = with_fallback(
+            self.notes_db.get_class_bitmasks,
+            CLASS_LOOKUP_SEED,
+            "class lookup",
+        )
+        self.class_display_by_id = {
+            row['id']: row.get('abbr') or row['name'] for row in class_rows
+        }
+        self.class_bitmask_display = {
+            row['bit_value']: row.get('abbr') or row['name'] for row in class_rows
+        }
+        self.class_bitmask_display[65535] = "ALL"
+
+        race_rows = with_fallback(
+            self.notes_db.get_race_bitmasks,
+            RACE_LOOKUP_SEED,
+            "race lookup",
+        )
+        self.race_display_by_id = {
+            row['id']: row.get('abbr') or row['name'] for row in race_rows
+        }
+        self.race_bitmask_display = {
+            row['bit_value']: row.get('abbr') or row['name'] for row in race_rows
+        }
+        self.race_bitmask_display[65535] = "ALL"
     
     def create_ui(self):
         """Create the complete Guild Manager UI"""
@@ -167,13 +260,9 @@ class GuildManagerTool:
         
         # Guild listbox
         self.guild_listbox = tk.Listbox(guild_list_frame, width=35)
+        self._make_widget_invisible_scroll(self.guild_listbox)
         self.guild_listbox.grid(row=2, column=0, sticky="nsew")
         self.guild_listbox.bind('<<ListboxSelect>>', self.on_guild_select)
-        
-        # Scrollbar for listbox
-        guild_scrollbar = ttk.Scrollbar(guild_list_frame, orient="vertical", command=self.guild_listbox.yview)
-        guild_scrollbar.grid(row=2, column=1, sticky="ns")
-        self.guild_listbox.config(yscrollcommand=guild_scrollbar.set)
     
     def create_center_top(self):
         """Create center area with guild details"""
@@ -222,11 +311,8 @@ class GuildManagerTool:
         motd_frame.grid_columnconfigure(0, weight=1)
         
         self.guild_motd_text = tk.Text(motd_frame, height=4, wrap=tk.WORD)
+        self._make_widget_invisible_scroll(self.guild_motd_text)
         self.guild_motd_text.grid(row=0, column=0, sticky="ew")
-        
-        motd_scrollbar = ttk.Scrollbar(motd_frame, orient="vertical", command=self.guild_motd_text.yview)
-        motd_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.guild_motd_text.config(yscrollcommand=motd_scrollbar.set)
         
         ttk.Label(details_frame, text="MOTD Setter:").grid(row=5, column=0, sticky="w", padx=(0, 5), pady=(5, 0))
         self.guild_motd_setter_var = tk.StringVar()
@@ -267,15 +353,12 @@ class GuildManagerTool:
         ranks_frame.grid_columnconfigure(0, weight=1)
         
         self.ranks_tree = ttk.Treeview(ranks_frame, columns=("rank", "title"), show="headings", height=6)
+        self._make_treeview_invisible_scroll(self.ranks_tree)
         self.ranks_tree.heading("#1", text="Rank")
         self.ranks_tree.heading("#2", text="Title")
         self.ranks_tree.column("#1", width=50)
         self.ranks_tree.column("#2", width=120)
         self.ranks_tree.grid(row=0, column=0, sticky="nsew")
-        
-        ranks_scrollbar = ttk.Scrollbar(ranks_frame, orient="vertical", command=self.ranks_tree.yview)
-        ranks_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.ranks_tree.config(yscrollcommand=ranks_scrollbar.set)
         
         # Rank editing - allow editing of title column (index 1)
         self.ranks_editor = TreeviewEdit(self.ranks_tree, [1], self.update_rank)
@@ -287,6 +370,7 @@ class GuildManagerTool:
         relations_frame.grid_columnconfigure(0, weight=1)
         
         self.relations_tree = ttk.Treeview(relations_frame, columns=("guild2", "guild_name", "relation"), show="headings", height=6)
+        self._make_treeview_invisible_scroll(self.relations_tree)
         self.relations_tree.heading("#1", text="Guild ID")
         self.relations_tree.heading("#2", text="Guild Name")
         self.relations_tree.heading("#3", text="Relation")
@@ -294,10 +378,6 @@ class GuildManagerTool:
         self.relations_tree.column("#2", width=100)
         self.relations_tree.column("#3", width=60)
         self.relations_tree.grid(row=0, column=0, sticky="nsew")
-        
-        relations_scrollbar = ttk.Scrollbar(relations_frame, orient="vertical", command=self.relations_tree.yview)
-        relations_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.relations_tree.config(yscrollcommand=relations_scrollbar.set)
         
         # Relations editing - allow editing of relation column (index 2)
         self.relations_editor = TreeviewEdit(self.relations_tree, [2], self.update_relation)
@@ -309,15 +389,12 @@ class GuildManagerTool:
         permissions_frame.grid_columnconfigure(0, weight=1)
         
         self.permissions_tree = ttk.Treeview(permissions_frame, columns=("perm_id", "permission"), show="headings", height=6)
+        self._make_treeview_invisible_scroll(self.permissions_tree)
         self.permissions_tree.heading("#1", text="Perm ID")
         self.permissions_tree.heading("#2", text="Permission")
         self.permissions_tree.column("#1", width=60)
         self.permissions_tree.column("#2", width=100)
         self.permissions_tree.grid(row=0, column=0, sticky="nsew")
-        
-        permissions_scrollbar = ttk.Scrollbar(permissions_frame, orient="vertical", command=self.permissions_tree.yview)
-        permissions_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.permissions_tree.config(yscrollcommand=permissions_scrollbar.set)
         
         # Permissions editing - allow editing of permission column (index 1)
         self.permissions_editor = TreeviewEdit(self.permissions_tree, [1], self.update_permission)
@@ -351,6 +428,7 @@ class GuildManagerTool:
                          "tribute_enable", "total_tribute", "last_tribute", "banker", "alt", "online", "last_login")
         
         self.members_tree = ttk.Treeview(members_frame, columns=member_columns, show="headings", height=12)
+        self._make_treeview_invisible_scroll(self.members_tree)
         
         # Set up member columns
         column_widths = {
@@ -363,10 +441,6 @@ class GuildManagerTool:
             self.members_tree.column(col, width=column_widths.get(col, 80))
         
         self.members_tree.grid(row=1, column=0, sticky="nsew")
-        
-        members_scrollbar = ttk.Scrollbar(members_frame, orient="vertical", command=self.members_tree.yview)
-        members_scrollbar.grid(row=1, column=1, sticky="ns")
-        self.members_tree.config(yscrollcommand=members_scrollbar.set)
         
         # Member editing - allow editing of rank, tribute settings, banker, alt status
         self.members_editor = TreeviewEdit(self.members_tree, [2, 7, 10, 11], self.update_member)
@@ -382,6 +456,7 @@ class GuildManagerTool:
         bank_columns = ("area", "slot", "item_id", "item_name", "quantity", "donator", "permissions", "who_for")
         
         self.bank_tree = ttk.Treeview(bank_frame, columns=bank_columns, show="headings", height=15)
+        self._make_treeview_invisible_scroll(self.bank_tree)
         
         # Set up bank columns
         bank_column_widths = {
@@ -394,10 +469,6 @@ class GuildManagerTool:
             self.bank_tree.column(col, width=bank_column_widths.get(col, 80))
         
         self.bank_tree.grid(row=0, column=0, sticky="nsew")
-        
-        bank_scrollbar = ttk.Scrollbar(bank_frame, orient="vertical", command=self.bank_tree.yview)
-        bank_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.bank_tree.config(yscrollcommand=bank_scrollbar.set)
     
     # Event handlers and data loading methods will be added next
     def load_guilds(self):
@@ -559,9 +630,15 @@ class GuildManagerTool:
             
             # Add members
             for member in members:
-                # Get class and race names from dictionaries if available
-                class_name = CLASS_BITMASK_DISPLAY.get(member['class'], str(member['class']))
-                race_name = RACE_BITMASK_DISPLAY.get(member['race'], str(member['race']))
+                # Get class and race names using lookup caches
+                class_name = self.class_display_by_id.get(
+                    member['class'],
+                    self.class_bitmask_display.get(member['class'], str(member['class']))
+                )
+                race_name = self.race_display_by_id.get(
+                    member['race'],
+                    self.race_bitmask_display.get(member['race'], str(member['race']))
+                )
                 
                 self.members_tree.insert("", tk.END, values=(
                     member['char_id'], member['name'], member['rank'], 

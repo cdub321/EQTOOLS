@@ -9,6 +9,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from shared.database import DatabaseManager
 from shared.theme import set_dark_theme
+from shared.notes_db import NotesDBManager
 from dictionaries import *
 from notebook import NotebookManager
 from tools.aa_tool import AAManagerTool
@@ -39,6 +40,7 @@ class EQToolsSuite:
         # Initialize managers (lazy activation later)
         self.db_manager = DatabaseManager()
         self.db_manager.configure(self.settings)
+        self.notes_db = NotesDBManager()
         self.notebook_manager = None
 
         self.interface_initialized = False
@@ -176,6 +178,12 @@ class EQToolsSuite:
         if not self.test_database_connection():
             self.show_configuration_dialog(required=True)
             return
+
+        # Initialize notes.db with lookup tables on first run
+        try:
+            self.notes_db.initialize_database()
+        except Exception as e:
+            print(f"Warning: Could not initialize notes.db: {e}")
 
         if self.notebook_manager is None:
             self.notebook_manager = NotebookManager()
@@ -349,7 +357,7 @@ class EQToolsSuite:
         aa_frame.grid_columnconfigure(0, weight=1)
         
         # Create the actual AA Manager tool
-        self.aa_tool = AAManagerTool(aa_frame, self.db_manager)
+        self.aa_tool = AAManagerTool(aa_frame, self.db_manager, self.notes_db)
         self.tab_frames["aa"] = aa_frame
         
         # Inventory Manager Tab - Replace placeholder with actual tool
@@ -358,7 +366,7 @@ class EQToolsSuite:
         inventory_frame.grid_columnconfigure(0, weight=1)
         
         # Create the actual Inventory Manager tool
-        self.inventory_tool = InventoryManagerTool(inventory_frame, self.db_manager)
+        self.inventory_tool = InventoryManagerTool(inventory_frame, self.db_manager, self.notes_db)
         self.tab_frames["inventory"] = inventory_frame
         
         # Tradeskill Manager Tab - Replace placeholder with actual tool
@@ -367,28 +375,28 @@ class EQToolsSuite:
         tradeskill_frame.grid_columnconfigure(0, weight=1)
         
         # Create the actual Tradeskill Manager tool
-        self.tradeskill_tool = TradeskillManagerTool(tradeskill_frame, self.db_manager)
+        self.tradeskill_tool = TradeskillManagerTool(tradeskill_frame, self.db_manager, self.notes_db)
         self.tab_frames["tradeskill"] = tradeskill_frame
         
         # Loot Tables Tab
         loot_frame = ttk.Frame(self.content_frame)
         loot_frame.grid_rowconfigure(0, weight=1)
         loot_frame.grid_columnconfigure(0, weight=1)
-        self.loot_tool = LootManagerTool(loot_frame, self.db_manager)
+        self.loot_tool = LootManagerTool(loot_frame, self.db_manager, self.notes_db)
         self.tab_frames["loot"] = loot_frame
         
         # Faction Manager Tab
         faction_frame = ttk.Frame(self.content_frame)
         faction_frame.grid_rowconfigure(0, weight=1)
         faction_frame.grid_columnconfigure(0, weight=1)
-        self.faction_tool = FactionManagerTool(faction_frame, self.db_manager)
+        self.faction_tool = FactionManagerTool(faction_frame, self.db_manager, self.notes_db)
         self.tab_frames["faction"] = faction_frame
         
         # Guild Manager Tab
         guild_frame = ttk.Frame(self.content_frame)
         guild_frame.grid_rowconfigure(0, weight=1)
         guild_frame.grid_columnconfigure(0, weight=1)
-        self.guild_tool = GuildManagerTool(guild_frame, self.db_manager)
+        self.guild_tool = GuildManagerTool(guild_frame, self.db_manager, self.notes_db)
         self.tab_frames["guild"] = guild_frame
         
         # Misc Manager Tab

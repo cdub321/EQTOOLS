@@ -9,7 +9,32 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.settings import SettingsManager
 
 
-class AdminTool:
+class _InvisibleScrollMixin:
+    """Provide invisible scrollbar behaviour for simple scrollable widgets."""
+
+    @staticmethod
+    def _make_widget_invisible_scroll(widget):
+        if hasattr(widget, "configure") and hasattr(widget, "yview"):
+            widget.configure(yscrollcommand=lambda *args: None)
+
+        def _on_mousewheel(event):
+            delta = event.delta
+            if delta == 0:
+                num = getattr(event, "num", 0)
+                delta = 120 if num == 4 else -120
+            direction = -1 if delta > 0 else 1
+            try:
+                widget.yview_scroll(direction, "units")
+            except tk.TclError:
+                pass
+            return "break"
+
+        widget.bind("<MouseWheel>", _on_mousewheel)
+        widget.bind("<Button-4>", _on_mousewheel)
+        widget.bind("<Button-5>", _on_mousewheel)
+
+
+class AdminTool(_InvisibleScrollMixin):
     """Administrative utilities: client settings, server info, and user management."""
 
     def __init__(self, parent_frame, settings_manager: SettingsManager, on_settings_updated=None):
@@ -77,11 +102,8 @@ class AdminTool:
 
         ttk.Label(frame, text="Existing Users:").grid(row=0, column=0, sticky="w")
         self.user_listbox = tk.Listbox(frame, height=8)
+        self._make_widget_invisible_scroll(self.user_listbox)
         self.user_listbox.grid(row=1, column=0, sticky="nsew", pady=(2, 5))
-
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.user_listbox.yview)
-        scrollbar.grid(row=1, column=1, sticky="ns")
-        self.user_listbox.configure(yscrollcommand=scrollbar.set)
 
         controls = ttk.Frame(frame)
         controls.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5, 0))

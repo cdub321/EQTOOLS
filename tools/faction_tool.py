@@ -2,12 +2,59 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import sys
 import os
+from typing import Dict, List
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.theme import set_dark_theme
-from dictionaries import RACE_BITMASK_DISPLAY, CLASS_BITMASK_DISPLAY
+from shared.notes_db import NotesDBManager
+from lookup_data import (
+    race_lookup as RACE_LOOKUP_SEED,
+    class_lookup as CLASS_LOOKUP_SEED,
+    deity_lookup as DEITY_LOOKUP_SEED,
+)
+
+
+class _TreeviewScrollMixin:
+    """Provide invisible scrollbar behaviour for scrollable widgets."""
+
+    @staticmethod
+    def _make_treeview_invisible_scroll(tree: ttk.Treeview):
+        _TreeviewScrollMixin._make_widget_invisible_scroll(tree, allow_horizontal=True)
+
+    @staticmethod
+    def _make_widget_invisible_scroll(widget, allow_horizontal: bool = False):
+        configure_kwargs = {}
+        if hasattr(widget, "yview"):
+            configure_kwargs["yscrollcommand"] = lambda *args: None
+        if allow_horizontal and hasattr(widget, "xview"):
+            configure_kwargs["xscrollcommand"] = lambda *args: None
+        if configure_kwargs:
+            widget.configure(**configure_kwargs)
+
+        def _on_mousewheel(event, horizontal=False):
+            delta = event.delta
+            if delta == 0:
+                num = getattr(event, "num", 0)
+                delta = 120 if num == 4 else -120
+            direction = -1 if delta > 0 else 1
+            try:
+                if horizontal and allow_horizontal and hasattr(widget, "xview_scroll"):
+                    widget.xview_scroll(direction, "units")
+                elif hasattr(widget, "yview_scroll"):
+                    widget.yview_scroll(direction, "units")
+            except tk.TclError:
+                pass
+            return "break"
+
+        widget.bind("<MouseWheel>", lambda event: _on_mousewheel(event))
+        widget.bind("<Button-4>", lambda event: _on_mousewheel(event))
+        widget.bind("<Button-5>", lambda event: _on_mousewheel(event))
+        if allow_horizontal:
+            widget.bind("<Shift-MouseWheel>", lambda event: _on_mousewheel(event, horizontal=True))
+            widget.bind("<Shift-Button-4>", lambda event: _on_mousewheel(event, horizontal=True))
+            widget.bind("<Shift-Button-5>", lambda event: _on_mousewheel(event, horizontal=True))
 
 class TreeviewEdit:
     """Cell editing functionality for Treeview widgets"""
@@ -93,14 +140,22 @@ class TreeviewEdit:
         self.editing = False
         self.edit_cell = None
 
-class FactionManagerTool:
+class FactionManagerTool(_TreeviewScrollMixin):
     """Faction Manager Tool - modular version for tabbed interface"""
     
-    def __init__(self, parent_frame, db_manager):
+    def __init__(self, parent_frame, db_manager, notes_db_manager: NotesDBManager):
         self.parent = parent_frame
         self.db_manager = db_manager
         self.conn = db_manager.connect()
         self.cursor = db_manager.get_cursor()
+        if not isinstance(notes_db_manager, NotesDBManager):
+            raise ValueError("FactionManagerTool requires a NotesDBManager instance")
+        self.notes_db: NotesDBManager = notes_db_manager
+        self.race_bitmask_display = {}
+        self.class_bitmask_display = {}
+        self.deity_name_to_bit = {}
+        self.sorted_deity_names = []
+        self.load_lookup_data()
         
         # Configure parent frame grid
         self.parent.grid_rowconfigure(0, weight=1)
@@ -119,6 +174,46 @@ class FactionManagerTool:
             print("Faction tool initialized successfully")
         except Exception as e:
             print(f"Warning: Could not initialize faction tool data: {e}")
+
+    def load_lookup_data(self):
+        """Load race, class, and deity lookup data with seed fallbacks."""
+        def _fetch(fetcher, seed):
+            rows = []
+            if self.notes_db:
+                try:
+                    rows = fetcher()
+                except Exception as exc:
+                    print(f"Warning: lookup fetch failed ({exc}); using seed data.")
+            if not rows:
+                rows = [{'id': sid, **data} for sid, data in seed.items()]
+            return rows
+
+        class_rows = _fetch(
+            lambda: self.notes_db.get_class_bitmasks(),
+            CLASS_LOOKUP_SEED,
+        )
+        self.class_bitmask_display = {
+            row['bit_value']: row.get('abbr') or row['name'] for row in class_rows
+        }
+        self.class_bitmask_display[65535] = "ALL"
+
+        race_rows = _fetch(
+            lambda: self.notes_db.get_race_bitmasks(),
+            RACE_LOOKUP_SEED,
+        )
+        self.race_bitmask_display = {
+            row['bit_value']: row.get('abbr') or row['name'] for row in race_rows
+        }
+        self.race_bitmask_display[65535] = "ALL"
+
+        deity_rows = _fetch(
+            lambda: self.notes_db.get_deity_bitmasks(),
+            DEITY_LOOKUP_SEED,
+        )
+        self.deity_name_to_bit = {
+            row['name']: row['bit_value'] for row in deity_rows
+        }
+        self.sorted_deity_names = sorted(self.deity_name_to_bit.keys())
     
     def create_ui(self):
         """Create the complete Faction Manager UI"""
@@ -161,6 +256,7 @@ class FactionManagerTool:
         
         # Faction Treeview (two columns, sortable). No extra scrollbars added.
         self.faction_tree = ttk.Treeview(faction_list_frame, columns=("id", "name"), show="headings")
+        self._make_treeview_invisible_scroll(self.faction_tree)
         self.faction_tree.heading("id", text="ID")
         self.faction_tree.heading("name", text="Name")
         self.faction_tree.column("id", width=60, anchor="center")
@@ -264,15 +360,12 @@ class FactionManagerTool:
         
         # Modifier treeview
         self.mod_tree = ttk.Treeview(mod_frame, columns=("mod", "mod_name"), show="headings", height=6)
+        self._make_treeview_invisible_scroll(self.mod_tree)
         self.mod_tree.heading("#1", text="Modifier")
         self.mod_tree.heading("#2", text="Race/Class")
         self.mod_tree.column("#1", width=70)
         self.mod_tree.column("#2", width=100)
         self.mod_tree.grid(row=0, column=0, sticky="nsew")
-        
-        mod_scrollbar = ttk.Scrollbar(mod_frame, orient="vertical", command=self.mod_tree.yview)
-        mod_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.mod_tree.config(yscrollcommand=mod_scrollbar.set)
         
         # Modifier editing
         self.mod_editor = TreeviewEdit(self.mod_tree, [0], self.update_modifier)
@@ -293,6 +386,7 @@ class FactionManagerTool:
         
         # Association treeview
         self.assoc_tree = ttk.Treeview(assoc_frame, columns=("faction_id", "faction_name", "modifier"), show="headings", height=6)
+        self._make_treeview_invisible_scroll(self.assoc_tree)
         self.assoc_tree.heading("#1", text="Associated Faction ID")
         self.assoc_tree.heading("#2", text="Faction Name")
         self.assoc_tree.heading("#3", text="Modifier")
@@ -300,10 +394,6 @@ class FactionManagerTool:
         self.assoc_tree.column("#2", width=100)
         self.assoc_tree.column("#3", width=60)
         self.assoc_tree.grid(row=0, column=0, sticky="nsew")
-        
-        assoc_scrollbar = ttk.Scrollbar(assoc_frame, orient="vertical", command=self.assoc_tree.yview)
-        assoc_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.assoc_tree.config(yscrollcommand=assoc_scrollbar.set)
         
         # Association editing - allow editing of faction ID (0) and modifier (2)
         self.assoc_editor = TreeviewEdit(self.assoc_tree, [0, 2], self.update_association)
@@ -326,9 +416,13 @@ class FactionManagerTool:
         faction_groups_frame.grid_columnconfigure(0, weight=1)
         
         # Faction groups treeview
-        self.faction_groups_tree = ttk.Treeview(faction_groups_frame, 
-                                               columns=("id", "name", "primaryfaction", "primary_faction_name", "ignore_primary_assist"), 
-                                               show="headings", height=10)
+        self.faction_groups_tree = ttk.Treeview(
+            faction_groups_frame,
+            columns=("id", "name", "primaryfaction", "primary_faction_name", "ignore_primary_assist"),
+            show="headings",
+            height=10,
+        )
+        self._make_treeview_invisible_scroll(self.faction_groups_tree)
         self.faction_groups_tree.heading("#1", text="Group ID")
         self.faction_groups_tree.heading("#2", text="Name")
         self.faction_groups_tree.heading("#3", text="Primary Faction ID")
@@ -344,10 +438,6 @@ class FactionManagerTool:
         self.faction_groups_tree.grid(row=0, column=0, sticky="nsew")
         self.faction_groups_tree.bind('<<TreeviewSelect>>', self.on_faction_group_select)
         
-        groups_scrollbar = ttk.Scrollbar(faction_groups_frame, orient="vertical", command=self.faction_groups_tree.yview)
-        groups_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.faction_groups_tree.config(yscrollcommand=groups_scrollbar.set)
-        
         # NPC Faction Entries (right)
         faction_entries_frame = ttk.LabelFrame(groups_frame, text="Faction Entries for Selected Group", padding="5")
         faction_entries_frame.grid(row=0, column=1, padx=(3, 0), sticky="nsew")
@@ -355,9 +445,13 @@ class FactionManagerTool:
         faction_entries_frame.grid_columnconfigure(0, weight=1)
         
         # Faction entries treeview
-        self.faction_entries_tree = ttk.Treeview(faction_entries_frame, 
-                                                columns=("npc_faction_id", "faction_id", "faction_name", "value", "npc_value", "temp"), 
-                                                show="headings", height=10)
+        self.faction_entries_tree = ttk.Treeview(
+            faction_entries_frame,
+            columns=("npc_faction_id", "faction_id", "faction_name", "value", "npc_value", "temp"),
+            show="headings",
+            height=10,
+        )
+        self._make_treeview_invisible_scroll(self.faction_entries_tree)
         self.faction_entries_tree.heading("#1", text="NPC Faction ID")
         self.faction_entries_tree.heading("#2", text="Faction ID")
         self.faction_entries_tree.heading("#3", text="Faction Name")
@@ -404,6 +498,7 @@ class FactionManagerTool:
                       "Skip Global Loot", "Exp Mod")
         
         self.npc_tree = ttk.Treeview(npc_frame, columns=npc_columns, show="headings", height=15)
+        self._make_treeview_invisible_scroll(self.npc_tree)
         
         # Define column widths like the original
         column_widths = {
@@ -421,10 +516,6 @@ class FactionManagerTool:
             self.npc_tree.column(col, width=column_widths.get(col, 80))
         
         self.npc_tree.grid(row=1, column=0, sticky="nsew")
-        
-        npc_scrollbar = ttk.Scrollbar(npc_frame, orient="vertical", command=self.npc_tree.yview)
-        npc_scrollbar.grid(row=1, column=1, sticky="ns")
-        self.npc_tree.config(yscrollcommand=npc_scrollbar.set)
         
         # NPC editing disabled per request (view-only)
         
@@ -1009,14 +1100,13 @@ class FactionManagerTool:
         listbox.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
         # Build options
         if kind == 'race':
-            options = sorted(RACE_BITMASK_DISPLAY.items(), key=lambda x: x[1])
+            options = sorted(self.race_bitmask_display.items(), key=lambda x: x[1])
             items = [name for _, name in options if name != 'ALL']
         elif kind == 'class':
-            options = sorted(CLASS_BITMASK_DISPLAY.items(), key=lambda x: x[1])
+            options = sorted(self.class_bitmask_display.items(), key=lambda x: x[1])
             items = [name for _, name in options if name != 'ALL']
         else:  # deity
-            # Use full names from DEITY_OPTIONS
-            items = sorted(DEITY_OPTIONS.keys())
+            items = list(self.sorted_deity_names)
         def refresh():
             term = search.get().lower()
             listbox.delete(0, tk.END)
@@ -1084,7 +1174,7 @@ class FactionManagerTool:
         # Race
         race_vars = []
         race_frame = frames['Race']
-        for val,name in sorted(RACE_BITMASK_DISPLAY.items()):
+        for val,name in sorted(self.race_bitmask_display.items()):
             if name=='ALL':
                 continue
             v=tk.IntVar()
@@ -1094,17 +1184,17 @@ class FactionManagerTool:
         # Class
         class_vars=[]
         class_frame = frames['Class']
-        for val,name in sorted(CLASS_BITMASK_DISPLAY.items()):
+        for val,name in sorted(self.class_bitmask_display.items()):
             if name=='ALL':
                 continue
             v=tk.IntVar()
             chk=ttk.Checkbutton(class_frame,text=f"{name} ({val})",variable=v)
             chk.pack(anchor='w')
             class_vars.append((v,val))
-        # Deity (use names only; show bit values from DEITY_OPTIONS)
+        # Deity (use names only; show bit values)
         deity_vars=[]
         deity_frame = frames['Deity']
-        for name,val in sorted(DEITY_OPTIONS.items(), key=lambda x:x[0]):
+        for name,val in sorted(self.deity_name_to_bit.items(), key=lambda x:x[0]):
             v=tk.IntVar()
             chk=ttk.Checkbutton(deity_frame,text=f"{name} ({val})",variable=v)
             chk.pack(anchor='w')

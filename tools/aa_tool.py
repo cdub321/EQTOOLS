@@ -2,31 +2,45 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import sys
 import os
-import sqlite3
+from collections import OrderedDict
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.theme import set_dark_theme
-from dictionaries import CLASS_OPTIONS, RACE_OPTIONS, DEITY_OPTIONS, CATEGORY_OPTIONS, TYPE_OPTIONS, EXPANSION_OPTIONS, SPELL_EFFECTS
 
 class AAManagerTool:
     """AA Manager Tool - modular version for tabbed interface"""
     
-    def __init__(self, parent_frame, db_manager):
+    def __init__(self, parent_frame, db_manager, notes_db_manager):
         self.parent = parent_frame
         self.db_manager = db_manager
         self.conn = db_manager.connect()
         self.cursor = db_manager.get_cursor()
-        
-        # Connect to notes.db for spell effect details
-        try:
-            self.notes_db = sqlite3.connect('notes.db')
-            self.notes_db.row_factory = sqlite3.Row  # Enable dict-like access
-        except Exception as err:
-            print(f"Warning: Could not connect to notes.db: {err}")
-            self.notes_db = None
-        
+        self.notes_db_manager = notes_db_manager
+        self.notes_db = None
+
+        if notes_db_manager:
+            try:
+                self.notes_db = notes_db_manager.connect()
+            except Exception as err:
+                print(f"Warning: Could not connect to notes.db: {err}")
+                self.notes_db = None
+
+        # Cached lookup data
+        self.race_options = OrderedDict()
+        self.class_options = OrderedDict()
+        self.deity_options = OrderedDict()
+        self.aa_categories = []
+        self.aa_category_labels = []
+        self.aa_types = []
+        self.aa_type_labels = []
+        self.expansions = []
+        self.expansion_labels = []
+        self.spell_effects = {}
+
+        self.load_lookup_data()
+
         # Configure parent frame grid
         self.parent.grid_rowconfigure(0, weight=1)
         self.parent.grid_columnconfigure(0, weight=1)
@@ -40,14 +54,70 @@ class AAManagerTool:
         
         # Load initial data
         self.load_aa_list()
-    
-    def __del__(self):
-        """Clean up SQLite connection"""
-        if hasattr(self, 'notes_db') and self.notes_db:
-            try:
-                self.notes_db.close()
-            except:
-                pass
+
+    def load_lookup_data(self):
+        """Load lookup data from notes.db for AA UI elements."""
+        if not self.notes_db_manager:
+            print("Warning: Notes database manager not provided for AA tool; using empty lookup data.")
+            return
+
+        try:
+            race_bitmasks = self.notes_db_manager.get_race_bitmasks()
+        except Exception as exc:
+            print(f"Warning: Could not load race bitmask lookup data: {exc}")
+            race_bitmasks = []
+        self.race_options = OrderedDict(
+            (row['name'], row['bit_value']) for row in race_bitmasks
+        )
+
+        try:
+            class_bitmasks = self.notes_db_manager.get_class_bitmasks()
+        except Exception as exc:
+            print(f"Warning: Could not load class bitmask lookup data: {exc}")
+            class_bitmasks = []
+        self.class_options = OrderedDict(
+            (row['name'], row['bit_value']) for row in class_bitmasks
+        )
+
+        try:
+            deity_bitmasks = self.notes_db_manager.get_deity_bitmasks()
+        except Exception as exc:
+            print(f"Warning: Could not load deity bitmask lookup data: {exc}")
+            deity_bitmasks = []
+        self.deity_options = OrderedDict(
+            (row['name'], row['bit_value']) for row in deity_bitmasks
+        )
+
+        try:
+            categories = self.notes_db_manager.get_aa_categories()
+        except Exception as exc:
+            print(f"Warning: Could not load AA categories: {exc}")
+            categories = []
+        self.aa_categories = categories
+        self.aa_category_labels = [row['label'] for row in categories]
+
+        try:
+            aa_types = self.notes_db_manager.get_aa_types()
+        except Exception as exc:
+            print(f"Warning: Could not load AA types: {exc}")
+            aa_types = []
+        self.aa_types = aa_types
+        self.aa_type_labels = [row['label'] for row in aa_types]
+
+        try:
+            expansions = self.notes_db_manager.get_expansions()
+        except Exception as exc:
+            print(f"Warning: Could not load expansion lookup data: {exc}")
+            expansions = []
+        self.expansions = expansions
+        self.expansion_labels = [row['label'] for row in expansions]
+
+        try:
+            spell_effects = self.notes_db_manager.get_all_spell_effects()
+        except Exception as exc:
+            print(f"Warning: Could not load spell effect lookup data: {exc}")
+            spell_effects = []
+        self.spell_effects = {row['id']: row['name'] for row in spell_effects}
     
     def create_ui(self):
         """Create the complete AA Manager UI"""
@@ -150,8 +220,10 @@ class AAManagerTool:
         ttk.Label(ability_frame, text="Category:").grid(row=1, column=9, sticky="e", padx=2, pady=2)
         self.category_var = tk.StringVar()
         self.category_dropdown = ttk.Combobox(ability_frame, textvariable=self.category_var, state="readonly", width=12)
-        self.category_dropdown['values'] = [text for (val, text) in CATEGORY_OPTIONS]
-        self.category_dropdown.current(0)
+        category_values = self.aa_category_labels or ["None"]
+        self.category_dropdown['values'] = category_values
+        if category_values:
+            self.category_dropdown.current(0)
         self.category_dropdown.grid(row=1, column=10, sticky="w", padx=3, pady=3)
         
         self.status_entry = self.create_label_entry_pair(ability_frame, "Status:", 2, 1, width=8)
@@ -178,8 +250,10 @@ class AAManagerTool:
         ttk.Label(ability_frame, text="Type:").grid(row=2, column=9, sticky="e", padx=3, pady=3)
         self.type_var = tk.StringVar()
         self.type_dropdown = ttk.Combobox(ability_frame, textvariable=self.type_var, state="readonly", width=12)
-        self.type_dropdown['values'] = [text for (val, text) in TYPE_OPTIONS]
-        self.type_dropdown.current(0)
+        type_values = self.aa_type_labels or ["General"]
+        self.type_dropdown['values'] = type_values
+        if type_values:
+            self.type_dropdown.current(0)
         self.type_dropdown.grid(row=2, column=10, sticky="w", padx=3, pady=3)
         
         # Create bitmask checkbox frames - spread across 12-column layout
@@ -194,11 +268,11 @@ class AAManagerTool:
         
         # Create bitmask checkboxes with improved spacing - all frames have 6 rows for consistency
         # Race frame: 3 columns with increased horizontal spacing (16 races = 6 rows)
-        self.race_checkvars = self.create_bitmask_checkboxes(race_frame, "Races", RACE_OPTIONS, 0, 0, cols=3, padx=10, pady=2)
+        self.race_checkvars = self.create_bitmask_checkboxes(race_frame, "Races", self.race_options, 0, 0, cols=3, padx=10, pady=2)
         # Class frame: 3 columns with increased horizontal spacing (16 classes = 6 rows)  
-        self.class_checkvars = self.create_bitmask_checkboxes(class_frame, "Classes", CLASS_OPTIONS, 0, 2, cols=3, padx=15, pady=2)
+        self.class_checkvars = self.create_bitmask_checkboxes(class_frame, "Classes", self.class_options, 0, 2, cols=3, padx=15, pady=2)
         # Deity frame: 3 columns with vertical spacing (17 deities = 6 rows)
-        self.deity_checkvars = self.create_bitmask_checkboxes(deity_frame, "Deities", DEITY_OPTIONS, 0, 4, cols=3, padx=8, pady=2)
+        self.deity_checkvars = self.create_bitmask_checkboxes(deity_frame, "Deities", self.deity_options, 0, 4, cols=3, padx=8, pady=2)
         
         # AA Ranks section - continue in next part...
         self.create_ranks_section(center_panel)
@@ -238,8 +312,10 @@ class AAManagerTool:
         ttk.Label(rank_fields_frame, text="Expansion:").grid(row=0, column=2, sticky="e", padx=2, pady=2)
         self.expansion_var = tk.StringVar()
         self.expansion_dropdown = ttk.Combobox(rank_fields_frame, textvariable=self.expansion_var, state="readonly", width=12)
-        self.expansion_dropdown['values'] = [text for (val, text) in EXPANSION_OPTIONS]
-        self.expansion_dropdown.current(0)
+        expansion_values = self.expansion_labels or ["All"]
+        self.expansion_dropdown['values'] = expansion_values
+        if expansion_values:
+            self.expansion_dropdown.current(0)
         self.expansion_dropdown.grid(row=0, column=3, sticky="w", padx=2, pady=2)
         
         self.spell_entry = self.create_label_entry_pair(rank_fields_frame, "Spell_ID:", 0, 5, width=8)
@@ -524,19 +600,23 @@ class AAManagerTool:
             
             # Set dropdowns
             category_value = str(aa_data.get('category', '-1'))
-            for i, (val, text) in enumerate(CATEGORY_OPTIONS):
-                if val == category_value:
-                    self.category_dropdown.current(i)
-                    break
-            else:
+            category_index = next(
+                (i for i, option in enumerate(self.aa_categories) if str(option['value']) == category_value),
+                None,
+            )
+            if category_index is not None:
+                self.category_dropdown.current(category_index)
+            elif self.aa_categories:
                 self.category_dropdown.current(0)
             
             type_value = str(aa_data.get('type', '1'))
-            for i, (val, text) in enumerate(TYPE_OPTIONS):
-                if val == type_value:
-                    self.type_dropdown.current(i)
-                    break
-            else:
+            type_index = next(
+                (i for i, option in enumerate(self.aa_types) if str(option['value']) == type_value),
+                None,
+            )
+            if type_index is not None:
+                self.type_dropdown.current(type_index)
+            elif self.aa_types:
                 self.type_dropdown.current(0)
             
             # Set bitmask checkboxes
@@ -733,11 +813,13 @@ class AAManagerTool:
             
             # Set expansion dropdown
             expansion_value = str(rank_data.get('expansion', '-1'))
-            for i, (val, text) in enumerate(EXPANSION_OPTIONS):
-                if val == expansion_value:
-                    self.expansion_dropdown.current(i)
-                    break
-            else:
+            expansion_index = next(
+                (i for i, option in enumerate(self.expansions) if str(option['value']) == expansion_value),
+                None,
+            )
+            if expansion_index is not None:
+                self.expansion_dropdown.current(expansion_index)
+            elif self.expansions:
                 self.expansion_dropdown.current(0)
                 
             self.prev_id_entry.insert(0, rank_data.get('prev_id', '-1'))
@@ -752,7 +834,7 @@ class AAManagerTool:
             if effects:
                 for effect in effects:
                     effect_id = effect.get('effect_id', '0')
-                    effect_name = SPELL_EFFECTS.get(int(effect_id), "Unknown Effect")
+                    effect_name = self.resolve_spell_effect_name(effect_id)
                     self.effects_treeview.insert('', 'end', values=(
                         effect.get('slot', ''),
                         effect_id,
@@ -835,6 +917,28 @@ class AAManagerTool:
             if var.get():
                 bitmask |= bit_value
         return bitmask
+
+    def resolve_spell_effect_name(self, effect_id):
+        """Resolve a spell effect ID to its display name."""
+        try:
+            effect_key = int(effect_id)
+        except (TypeError, ValueError):
+            return "Unknown Effect"
+
+        name = self.spell_effects.get(effect_key)
+        if name:
+            return name
+
+        if self.notes_db_manager:
+            try:
+                name = self.notes_db_manager.get_spell_effect_name(effect_key)
+            except Exception:
+                name = None
+            if name:
+                self.spell_effects[effect_key] = name
+                return name
+
+        return "Unknown Effect"
     
     def get_spell_effect_details(self, effect_id):
         """Get spell effect details from notes.db"""
@@ -1147,13 +1251,21 @@ class AAManagerTool:
             aa_data = {
                 'id': aa_id,
                 'name': self.name_entry.get(),
-                'category': CATEGORY_OPTIONS[self.category_dropdown.current()][0] or '-1',
+                'category': (
+                    self.aa_categories[self.category_dropdown.current()]['value']
+                    if self.aa_categories and self.category_dropdown.current() >= 0
+                    else '-1'
+                ),
                 'classes': self.get_bitmask_from_checkboxes(self.class_checkvars) or '65535',
                 'races': self.get_bitmask_from_checkboxes(self.race_checkvars) or '65535',
                 'drakkin_heritage': self.drakkin_entry.get() or '127',
                 'deities': self.get_bitmask_from_checkboxes(self.deity_checkvars) or '131071',
                 'status': self.status_entry.get() or '0',
-                'type': TYPE_OPTIONS[self.type_dropdown.current()][0] or '1',
+                'type': (
+                    self.aa_types[self.type_dropdown.current()]['value']
+                    if self.aa_types and self.type_dropdown.current() >= 0
+                    else '1'
+                ),
                 'charges': self.charges_entry.get() or '0',
                 'grant_only': self.grant_only_var.get() or '0',
                 'first_rank_id': self.first_rank_entry.get() or '-1',
@@ -1226,7 +1338,11 @@ class AAManagerTool:
                 'spell': self.spell_entry.get() or '-1',
                 'spell_type': self.spell_type_entry.get() or '0',
                 'recast_time': self.recast_entry.get() or '0',
-                'expansion': EXPANSION_OPTIONS[self.expansion_dropdown.current()][0] or '-1',
+                'expansion': (
+                    str(self.expansions[self.expansion_dropdown.current()]['value'])
+                    if self.expansions and self.expansion_dropdown.current() >= 0
+                    else '-1'
+                ),
                 'prev_id': self.prev_id_entry.get() or '-1',
                 'next_id': self.next_id_entry.get() or '-1'
             }
@@ -1754,7 +1870,7 @@ class AAManagerTool:
             """, (rank_id, next_slot, 0, 0, 0))
             
             # Add to treeview with effect name
-            effect_name = SPELL_EFFECTS.get(0, "Unknown Effect")
+            effect_name = self.resolve_spell_effect_name(0)
             self.effects_treeview.insert('', 'end', values=(next_slot, '0', effect_name, '0', '0'))
             
         except Exception as err:
@@ -1879,14 +1995,14 @@ class AAManagerTool:
         scrollbar.config(command=effects_listbox.yview)
         
         # Populate the listbox with all effects
-        for effect_id, effect_name in sorted(SPELL_EFFECTS.items()):
+        for effect_id, effect_name in sorted(self.spell_effects.items()):
             effects_listbox.insert(tk.END, f"{effect_id}: {effect_name}")
         
         # Function to filter the listbox based on search
         def filter_list(*args):
             search_term = search_var.get().lower()
             effects_listbox.delete(0, tk.END)
-            for effect_id, effect_name in sorted(SPELL_EFFECTS.items()):
+            for effect_id, effect_name in sorted(self.spell_effects.items()):
                 if search_term in str(effect_id).lower() or search_term in effect_name.lower():
                     effects_listbox.insert(tk.END, f"{effect_id}: {effect_name}")
         
@@ -2160,7 +2276,7 @@ class AAManagerTool:
                     if treeview == self.effects_treeview and col_index == 1:
                         try:
                             effect_id = int(new_value)
-                            effect_name = SPELL_EFFECTS.get(effect_id, "Unknown Effect")
+                            effect_name = self.resolve_spell_effect_name(effect_id)
                             new_values[2] = effect_name
                         except ValueError:
                             pass

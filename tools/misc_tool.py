@@ -8,7 +8,48 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.theme import set_dark_theme
 
-class MiscManagerTool:
+
+class _TreeviewScrollMixin:
+    """Provide invisible scrollbar behaviour for scrollable widgets."""
+
+    @staticmethod
+    def _make_treeview_invisible_scroll(tree):
+        _TreeviewScrollMixin._make_widget_invisible_scroll(tree, allow_horizontal=True)
+
+    @staticmethod
+    def _make_widget_invisible_scroll(widget, allow_horizontal: bool = False):
+        configure_kwargs = {}
+        if hasattr(widget, "yview"):
+            configure_kwargs["yscrollcommand"] = lambda *args: None
+        if allow_horizontal and hasattr(widget, "xview"):
+            configure_kwargs["xscrollcommand"] = lambda *args: None
+        if configure_kwargs:
+            widget.configure(**configure_kwargs)
+
+        def _on_mousewheel(event, horizontal=False):
+            delta = event.delta
+            if delta == 0:
+                num = getattr(event, "num", 0)
+                delta = 120 if num == 4 else -120
+            direction = -1 if delta > 0 else 1
+            try:
+                if horizontal and allow_horizontal and hasattr(widget, "xview_scroll"):
+                    widget.xview_scroll(direction, "units")
+                elif hasattr(widget, "yview_scroll"):
+                    widget.yview_scroll(direction, "units")
+            except tk.TclError:
+                pass
+            return "break"
+
+        widget.bind("<MouseWheel>", lambda event: _on_mousewheel(event))
+        widget.bind("<Button-4>", lambda event: _on_mousewheel(event))
+        widget.bind("<Button-5>", lambda event: _on_mousewheel(event))
+        if allow_horizontal:
+            widget.bind("<Shift-MouseWheel>", lambda event: _on_mousewheel(event, horizontal=True))
+            widget.bind("<Shift-Button-4>", lambda event: _on_mousewheel(event, horizontal=True))
+            widget.bind("<Shift-Button-5>", lambda event: _on_mousewheel(event, horizontal=True))
+
+class MiscManagerTool(_TreeviewScrollMixin):
     """Miscellaneous Manager Tool - fishing, foraging, and level experience modifiers"""
     
     def __init__(self, parent_frame, db_manager):
@@ -84,6 +125,7 @@ class MiscManagerTool:
                           "npc_id", "npc_chance", "min_expansion", "max_expansion")
         
         self.fishing_tree = ttk.Treeview(fishing_frame, columns=fishing_columns, show="headings")
+        self._make_treeview_invisible_scroll(self.fishing_tree)
         
         # Set up fishing columns with smaller widths
         column_widths = {
@@ -97,11 +139,6 @@ class MiscManagerTool:
         
         # Place treeview directly in fishing_frame
         self.fishing_tree.grid(row=1, column=0, sticky="nsew")
-        
-        # Scrollbar for fishing tree
-        fishing_v_scrollbar = ttk.Scrollbar(fishing_frame, orient="vertical", command=self.fishing_tree.yview)
-        fishing_v_scrollbar.grid(row=1, column=1, sticky="ns")
-        self.fishing_tree.config(yscrollcommand=fishing_v_scrollbar.set)
         
         # Fishing editing - bind double-click event
         self.fishing_tree.bind("<Double-1>", self.on_fishing_edit)
@@ -140,6 +177,7 @@ class MiscManagerTool:
                          "min_expansion", "max_expansion")
         
         self.forage_tree = ttk.Treeview(forage_frame, columns=forage_columns, show="headings")
+        self._make_treeview_invisible_scroll(self.forage_tree)
         
         # Set up forage columns with smaller widths
         column_widths = {
@@ -153,11 +191,6 @@ class MiscManagerTool:
         
         # Place treeview directly in forage_frame
         self.forage_tree.grid(row=1, column=0, sticky="nsew")
-        
-        # Scrollbar for forage tree
-        forage_v_scrollbar = ttk.Scrollbar(forage_frame, orient="vertical", command=self.forage_tree.yview)
-        forage_v_scrollbar.grid(row=1, column=1, sticky="ns")
-        self.forage_tree.config(yscrollcommand=forage_v_scrollbar.set)
         
         # Forage editing - bind double-click event
         self.forage_tree.bind("<Double-1>", self.on_forage_edit)
@@ -199,6 +232,7 @@ class MiscManagerTool:
         exp_columns = ("level", "exp_mod", "aa_exp_mod")
         
         self.exp_tree = ttk.Treeview(exp_frame, columns=exp_columns, show="headings")
+        self._make_treeview_invisible_scroll(self.exp_tree)
         
         # Set up exp columns - narrow widths for left panel
         column_widths = {"level": 40, "exp_mod": 60, "aa_exp_mod": 70}
@@ -209,11 +243,6 @@ class MiscManagerTool:
         
         # Place treeview directly in exp_frame
         self.exp_tree.grid(row=2, column=0, sticky="nsew")
-        
-        # Scrollbar for exp tree
-        exp_scrollbar = ttk.Scrollbar(exp_frame, orient="vertical", command=self.exp_tree.yview)
-        exp_scrollbar.grid(row=2, column=1, sticky="ns")
-        self.exp_tree.config(yscrollcommand=exp_scrollbar.set)
         
         # Exp editing - bind double-click event
         self.exp_tree.bind("<Double-1>", self.on_exp_mod_edit)

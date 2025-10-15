@@ -11,6 +11,47 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+class _TreeviewScrollMixin:
+    """Provide invisible scrollbar behaviour for scrollable widgets."""
+
+    @staticmethod
+    def _make_treeview_invisible_scroll(tree: ttk.Treeview):
+        _TreeviewScrollMixin._make_widget_invisible_scroll(tree, allow_horizontal=True)
+
+    @staticmethod
+    def _make_widget_invisible_scroll(widget, allow_horizontal: bool = False):
+        configure_kwargs = {}
+        if hasattr(widget, "yview"):
+            configure_kwargs["yscrollcommand"] = lambda *args: None
+        if allow_horizontal and hasattr(widget, "xview"):
+            configure_kwargs["xscrollcommand"] = lambda *args: None
+        if configure_kwargs:
+            widget.configure(**configure_kwargs)
+
+        def _on_mousewheel(event, horizontal=False):
+            delta = event.delta
+            if delta == 0:
+                num = getattr(event, "num", 0)
+                delta = 120 if num == 4 else -120
+            direction = -1 if delta > 0 else 1
+            try:
+                if horizontal and allow_horizontal and hasattr(widget, "xview_scroll"):
+                    widget.xview_scroll(direction, "units")
+                elif hasattr(widget, "yview_scroll"):
+                    widget.yview_scroll(direction, "units")
+            except tk.TclError:
+                pass
+            return "break"
+
+        widget.bind("<MouseWheel>", lambda event: _on_mousewheel(event))
+        widget.bind("<Button-4>", lambda event: _on_mousewheel(event))
+        widget.bind("<Button-5>", lambda event: _on_mousewheel(event))
+        if allow_horizontal:
+            widget.bind("<Shift-MouseWheel>", lambda event: _on_mousewheel(event, horizontal=True))
+            widget.bind("<Shift-Button-4>", lambda event: _on_mousewheel(event, horizontal=True))
+            widget.bind("<Shift-Button-5>", lambda event: _on_mousewheel(event, horizontal=True))
+
+
 @dataclass
 class LogEntry:
     timestamp: str
@@ -21,7 +62,7 @@ class LogEntry:
     coordinates: Optional[Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]]
 
 
-class LogManagerTool:
+class LogManagerTool(_TreeviewScrollMixin):
     """Log Manager Tool - load EQ client logs and group messages by keyword."""
 
     LOG_LINE_RE = re.compile(r"^\[(?P<timestamp>.*?)\]\s+(?P<content>.*)$")
@@ -122,15 +163,12 @@ class LogManagerTool:
             selectmode="browse",
             height=18,
         )
+        self._make_treeview_invisible_scroll(self.keyword_tree)
         self.keyword_tree.heading("keyword", text="Keyword")
         self.keyword_tree.heading("count", text="Count")
         self.keyword_tree.column("keyword", width=150, anchor="w")
         self.keyword_tree.column("count", width=60, anchor="center")
         self.keyword_tree.grid(row=0, column=0, sticky="nsew")
-
-        keyword_scrollbar = ttk.Scrollbar(keyword_frame, orient="vertical", command=self.keyword_tree.yview)
-        keyword_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.keyword_tree.configure(yscrollcommand=keyword_scrollbar.set)
 
         self.keyword_tree.bind("<<TreeviewSelect>>", self.on_keyword_selected)
 
@@ -175,6 +213,7 @@ class LogManagerTool:
             show="headings",
             selectmode="browse",
         )
+        self._make_treeview_invisible_scroll(self.entry_tree)
         self.entry_tree.heading("timestamp", text="Timestamp")
         self.entry_tree.heading("channel", text="Channel")
         self.entry_tree.heading("speaker", text="Speaker")
@@ -184,12 +223,6 @@ class LogManagerTool:
         self.entry_tree.column("speaker", width=150, anchor="w")
         self.entry_tree.column("message", width=600, anchor="w")
         self.entry_tree.grid(row=2, column=0, sticky="nsew")
-
-        entry_v_scroll = ttk.Scrollbar(entries_frame, orient="vertical", command=self.entry_tree.yview)
-        entry_v_scroll.grid(row=2, column=1, sticky="ns")
-        entry_h_scroll = ttk.Scrollbar(entries_frame, orient="horizontal", command=self.entry_tree.xview)
-        entry_h_scroll.grid(row=3, column=0, sticky="ew")
-        self.entry_tree.configure(yscrollcommand=entry_v_scroll.set, xscrollcommand=entry_h_scroll.set)
 
         self.entry_tree.bind("<<TreeviewSelect>>", self.on_entry_selected)
 

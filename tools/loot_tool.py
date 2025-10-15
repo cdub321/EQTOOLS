@@ -2,25 +2,63 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import sys
 import os
-import sqlite3
 from PIL import Image, ImageTk
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.theme import set_dark_theme
-from dictionaries import (CLASS_BITMASK_DISPLAY, RACE_BITMASK_DISPLAY, SLOT_BITMASK_DISPLAY, 
-                         ITEM_STAT_DISPLAY_CONFIG, NPC_TYPES_COLUMNS)
+from dictionaries import (SLOT_BITMASK_DISPLAY, ITEM_STAT_DISPLAY_CONFIG, NPC_TYPES_COLUMNS)
+from lookup_data import (
+    class_lookup as CLASS_LOOKUP_SEED,
+    race_lookup as RACE_LOOKUP_SEED,
+)
 
 class LootManagerTool:
     """Loot Manager Tool - modular version for tabbed interface"""
     
-    def __init__(self, parent_frame, db_manager):
+    def __init__(self, parent_frame, db_manager, notes_db_manager):
         self.parent = parent_frame
         self.db_manager = db_manager
         self.conn = db_manager.connect()
         self.cursor = db_manager.get_cursor()
+        self.notes_db = notes_db_manager
+        self.class_bitmask_display = {}
+        self.race_bitmask_display = {}
+        self.load_lookup_data()
         
+
+    def load_lookup_data(self):
+        """Load race and class bitmask displays with seed fallbacks."""
+        def _fetch(fetcher, seed):
+            rows = []
+            if self.notes_db:
+                try:
+                    rows = fetcher()
+                except Exception as exc:
+                    print(f"Warning: lookup fetch failed ({exc}); using seed data.")
+            if not rows:
+                rows = [{'id': sid, **data} for sid, data in seed.items()]
+            return rows
+
+        class_rows = _fetch(
+            lambda: self.notes_db.get_class_bitmasks(),
+            CLASS_LOOKUP_SEED,
+        )
+        self.class_bitmask_display = {
+            row['bit_value']: row.get('abbr') or row['name'] for row in class_rows
+        }
+        self.class_bitmask_display[65535] = 'ALL'
+
+        race_rows = _fetch(
+            lambda: self.notes_db.get_race_bitmasks(),
+            RACE_LOOKUP_SEED,
+        )
+        self.race_bitmask_display = {
+            row['bit_value']: row.get('abbr') or row['name'] for row in race_rows
+        }
+        self.race_bitmask_display[65535] = 'ALL'
+
         # Configure parent frame grid
         self.parent.grid_rowconfigure(0, weight=1)
         self.parent.grid_columnconfigure(0, weight=1)
@@ -34,7 +72,6 @@ class LootManagerTool:
         
         # Load initial data safely
         try:
-            self.setup_notes_db()
             self.find_unused_ids()
             print("Loot tool initialized successfully")
         except Exception as e:
@@ -367,16 +404,6 @@ class LootManagerTool:
         self.npc_tree.bind("<Double-1>", self.on_npc_edit)
         self.setup_treeview_sorting(self.npc_tree)
 
-    # Placeholder methods - will implement these in the next phase
-    def setup_notes_db(self):
-        """Setup SQLite notes database"""
-        conn = sqlite3.connect('notes.db')
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS notes
-                     (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, type TEXT, content TEXT)''')
-        conn.commit()
-        conn.close()
-    
     def find_unused_ids(self):
         """Find unused loot table and loot drop IDs"""
         # Simplified query to find next available ID
@@ -1058,7 +1085,7 @@ class LootManagerTool:
                     item_stats["classes"] = "ALL"
                 else:
                     class_names = []
-                    for bit_value, class_name in CLASS_BITMASK_DISPLAY.items():
+                    for bit_value, class_name in self.class_bitmask_display.items():
                         if bit_value != 65535 and classes_bitmask & bit_value:
                             class_names.append(class_name)
                     item_stats["classes"] = ", ".join(class_names)
@@ -1070,7 +1097,7 @@ class LootManagerTool:
                     item_stats["races"] = "ALL"
                 else:
                     race_names = []
-                    for bit_value, race_name in RACE_BITMASK_DISPLAY.items():
+                    for bit_value, race_name in self.race_bitmask_display.items():
                         if bit_value != 65535 and races_bitmask & bit_value:
                             race_names.append(race_name)
                     item_stats["races"] = ", ".join(race_names)
