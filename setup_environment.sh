@@ -1,23 +1,26 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# ============================================================
+# EQ Tools Suite Environment Setup (Linux/macOS)
+#
+# Usage:
+#   chmod +x setup_environment.sh
+#   ./setup_environment.sh
+#
+# Requirements:
+#   • Python 3.11+ (ideally 3.13)
+#   • pip & venv included
+# ============================================================
 
+set -e
 echo "Setting up EQ Tools Suite development environment..."
 
-# Create virtual environment
-python3 -m venv venv
-
-# Activate virtual environment
+python -m venv venv
 source venv/bin/activate
 
-# Upgrade pip
 pip install --upgrade pip
-
-# Install requirements
 pip install -r requirements.txt
 
+echo ""
 echo "Virtual environment setup complete!"
-echo ""
-echo "To activate the environment, run:"
-echo "source venv/bin/activate"
-echo ""
-echo "To run the application:"
-echo "python main_window.py"
+echo "To activate later: source venv/bin/activate"
+echo "To run the app:    python main_window.py"
