@@ -29,10 +29,21 @@ class EQToolsSuite:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("EQEmu Server Management Suite")
-        self.root.geometry("1678x832")
+        self.root.geometry("1705x832")
 
         # Apply your exact dark theme
         self.style = set_dark_theme(self.root)
+
+        # Set application icon from default.jpg (favicon)
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "images", "other", "default.jpg")
+            if os.path.exists(icon_path):
+                _icon_img = Image.open(icon_path)
+                self.app_icon = ImageTk.PhotoImage(_icon_img)
+                self.root.iconphoto(True, self.app_icon)
+        except Exception as _e:
+            # Non-fatal if icon fails to load
+            pass
 
         # Settings manager (client directory, future settings)
         self.settings = SettingsManager()
@@ -266,26 +277,12 @@ class EQToolsSuite:
         title_frame.grid_columnconfigure(1, weight=0)
 
         title_label = ttk.Label(title_frame, text="EQEmulator Tool Suite", font=("Arial", 14, "bold"))
-        title_label.grid(row=0, column=0, sticky="w")
+        title_label.grid(row=0, column=0, sticky="n", padx=(0, 450))
 
         notebook_button = ttk.Button(title_frame, text="📝 Notes", command=self.open_notebook, width=10)
         notebook_button.grid(row=0, column=1, padx=(10, 0))
 
-        # Column 2: Logo (right side)
-        try:
-            logo_path = os.path.join(os.path.dirname(__file__), "images", "other", "default.jpg")
-            if os.path.exists(logo_path):
-                logo_image = Image.open(logo_path)
-                logo_image.thumbnail((90, 65), Image.Resampling.LANCZOS)
-                self.logo_photo = ImageTk.PhotoImage(logo_image)
-                logo_label = ttk.Label(inner_frame, image=self.logo_photo)
-                logo_label.grid(row=0, column=2, sticky="e")
-            else:
-                logo_label = ttk.Label(inner_frame, text="EQ", font=("Arial", 12, "bold"))
-                logo_label.grid(row=0, column=2, sticky="e")
-        except Exception:
-            logo_label = ttk.Label(inner_frame, text="EQ", font=("Arial", 12, "bold"))
-            logo_label.grid(row=0, column=2, sticky="e")
+        # Column 2 intentionally empty (favicon set at window level)
     
     def create_custom_tabs(self, parent):
         """Create custom tab buttons"""

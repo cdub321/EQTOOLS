@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, simpledialog
 import sys
 import os
 from PIL import Image, ImageTk
+import glob
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -202,69 +203,76 @@ class LootManagerTool:
         self.middle_root_frame = ttk.Frame(self.main_frame, relief=tk.SUNKEN, borderwidth=1)
         self.middle_root_frame.grid(row=1, column=0, padx=5, pady=5, sticky="nsew")
         
-        # Configure grid for two columns: loot table and loot drop
+        # Configure grid: row 0 = modification bar (spans all columns)
+        # row 1 = three columns: Loot Table tree | middle buttons | Loot Drop tree
         self.middle_root_frame.grid_columnconfigure(0, weight=1)
-        self.middle_root_frame.grid_columnconfigure(1, weight=1)
+        self.middle_root_frame.grid_columnconfigure(1, weight=0)
+        self.middle_root_frame.grid_columnconfigure(2, weight=1)
+        self.middle_root_frame.grid_rowconfigure(0, weight=0)
+        self.middle_root_frame.grid_rowconfigure(1, weight=1)
         
         self.create_loottable_section()
         self.create_lootdrop_section()
     
     def create_loottable_section(self):
         """Create loot table management section"""
-        # Loot table frame
+        # Loot table frame (top modification bar spanning full width)
         loottable_frame = ttk.Frame(self.middle_root_frame)
-        loottable_frame.grid(row=0, column=0, padx=5, sticky="nsew")
+        loottable_frame.grid(row=0, column=0, columnspan=3, padx=5, sticky="ew")
         
         # Loot table modification frame
         loottable_mod_frame = ttk.Frame(loottable_frame, relief=tk.SUNKEN, borderwidth=2)
         loottable_mod_frame.grid(row=0, column=0, sticky="ew", pady=5)
+        loottable_mod_frame.grid_columnconfigure(0, weight=0)
+        # Make the entire bar a single row of fields/buttons
         
         # Loot table ID variable
         self.loot_id_var = tk.StringVar(value="Loot Table ID: ")
-        ttk.Label(loottable_mod_frame, textvariable=self.loot_id_var, font=("Arial", 12, "bold")).grid(row=0, sticky="w", columnspan=2)
+        ttk.Label(loottable_mod_frame, textvariable=self.loot_id_var, font=("Arial", 12, "bold")).grid(row=0, column=0, sticky="w")
         
         # Loot table entries
-        ttk.Label(loottable_mod_frame, text="Loot Table Name:").grid(row=1, column=0, sticky="w")
+        ttk.Label(loottable_mod_frame, text="Loot Table Name:").grid(row=0, column=1, sticky="w")
         self.loottable_name_entry = ttk.Entry(loottable_mod_frame, width=20)
-        self.loottable_name_entry.grid(row=1, column=1, padx=5)
+        self.loottable_name_entry.grid(row=0, column=2, padx=5)
         
-        ttk.Label(loottable_mod_frame, text="Avg Coin:").grid(row=1, column=2, sticky="w")
+        ttk.Label(loottable_mod_frame, text="Avg Coin:").grid(row=0, column=3, sticky="w")
         self.avgcoin_entry = ttk.Entry(loottable_mod_frame, width=8)
-        self.avgcoin_entry.grid(row=1, column=3, padx=5, pady=3, sticky="w")
+        self.avgcoin_entry.grid(row=0, column=4, padx=5, pady=3, sticky="w")
         
-        ttk.Label(loottable_mod_frame, text="Min Cash:").grid(row=2, column=0, sticky="w")
+        ttk.Label(loottable_mod_frame, text="Min Cash:").grid(row=0, column=5, sticky="w")
         self.mincash_entry = ttk.Entry(loottable_mod_frame, width=5)
-        self.mincash_entry.grid(row=2, column=1, padx=5, sticky="w")
+        self.mincash_entry.grid(row=0, column=6, padx=5, sticky="w")
         
-        ttk.Label(loottable_mod_frame, text="Max Cash:").grid(row=2, column=2, sticky="w")
+        ttk.Label(loottable_mod_frame, text="Max Cash:").grid(row=0, column=7, sticky="w")
         self.maxcash_entry = ttk.Entry(loottable_mod_frame, width=8)
-        self.maxcash_entry.grid(row=2, column=3, padx=5, pady=3, sticky="w")
+        self.maxcash_entry.grid(row=0, column=8, padx=5, pady=3, sticky="w")
         
-        ttk.Label(loottable_mod_frame, text="Min Xpac:").grid(row=3, column=0, sticky="w")
+        ttk.Label(loottable_mod_frame, text="Min Xpac:").grid(row=0, column=9, sticky="w")
         self.minexpac_entry = ttk.Entry(loottable_mod_frame, width=5)
-        self.minexpac_entry.grid(row=3, column=1, padx=5, sticky="w")
+        self.minexpac_entry.grid(row=0, column=10, padx=5, sticky="w")
         
-        ttk.Label(loottable_mod_frame, text="Max Xpac:").grid(row=3, column=2, sticky="w")
+        ttk.Label(loottable_mod_frame, text="Max Xpac:").grid(row=0, column=11, sticky="w")
         self.maxexpac_entry = ttk.Entry(loottable_mod_frame, width=5)
-        self.maxexpac_entry.grid(row=3, column=3, padx=5, pady=3, sticky="w")
+        self.maxexpac_entry.grid(row=0, column=12, padx=5, pady=3, sticky="w")
         
-        ttk.Label(loottable_mod_frame, text="Update Changes").grid(row=1, column=4, padx=17, sticky="nsew")
-        ttk.Button(loottable_mod_frame, text="Update", command=self.update_loottable).grid(row=2, column=4, padx=25, pady=3, sticky="n", rowspan=2)
+        ttk.Label(loottable_mod_frame, text="Update Changes").grid(row=0, column=13, padx=10, sticky="w")
+        ttk.Button(loottable_mod_frame, text="Update", command=self.update_loottable).grid(row=0, column=14, padx=10, pady=3, sticky="w")
         
-        # Loot table modification buttons frame
-        loottable_mod_frame2 = ttk.Frame(loottable_frame, relief=tk.SUNKEN, borderwidth=2)
-        loottable_mod_frame2.grid(row=1, column=0, sticky="ew", pady=5)
+        # Middle buttons between trees (create/remove/add lootdrop) in column 1
+        loottable_mod_frame2 = ttk.Frame(self.middle_root_frame, relief=tk.SUNKEN, borderwidth=2)
+        loottable_mod_frame2.grid(row=1, column=1, sticky="ns", pady=5, padx=3)
+        loottable_mod_frame2.grid_columnconfigure(0, weight=1)
+
+        ttk.Button(loottable_mod_frame2, text="Create Lootdrop & Add", command=self.add_new_lootdrop).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
+        ttk.Button(loottable_mod_frame2, text="Remove Selected Lootdrop", command=self.remove_selected_lootdrop).grid(row=1, column=0, padx=3, pady=2, sticky="ew")
+        ttk.Button(loottable_mod_frame2, text="Add Existing Lootdrop ID:", command=self.add_existing_lootdrop_to_loottable).grid(row=2, column=0, padx=3, pady=(6,2), sticky="ew")
         
-        ttk.Button(loottable_mod_frame2, text="Create Lootdrop & Add", command=self.add_new_lootdrop).grid(row=0, column=0, padx=3)
-        ttk.Button(loottable_mod_frame2, text="Remove Selected Lootdrop", command=self.remove_selected_lootdrop).grid(row=0, column=2, padx=3)
-        ttk.Button(loottable_mod_frame2, text="Add Existing Lootdrop ID:", command=self.add_existing_lootdrop_to_loottable).grid(row=0, column=3, pady=5, padx=3)
+        self.lootdrop_id_entry = ttk.Entry(loottable_mod_frame2, width=12)
+        self.lootdrop_id_entry.grid(row=3, column=0, padx=3, pady=(0,2), sticky="ew")
         
-        self.lootdrop_id_entry = ttk.Entry(loottable_mod_frame2, width=10)
-        self.lootdrop_id_entry.grid(row=0, column=4, pady=5, padx=2)
-        
-        # Loot table tree
-        loottable_tree_frame = ttk.Frame(loottable_frame, relief=tk.SUNKEN, borderwidth=2)
-        loottable_tree_frame.grid(row=2, column=0, sticky="nsew", pady=5)
+        # Loot table tree placed alongside Loot Drop Entries (same row in middle_root_frame)
+        loottable_tree_frame = ttk.Frame(self.middle_root_frame, relief=tk.SUNKEN, borderwidth=2)
+        loottable_tree_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         loottable_tree_frame.grid_rowconfigure(1, weight=1)
         loottable_tree_frame.grid_columnconfigure(0, weight=1)
         
@@ -280,34 +288,51 @@ class LootManagerTool:
         
         # Set specific column widths
         self.loot_tree.column("LootDrop ID", width=80, stretch=False)
-        self.loot_tree.column("LootDrop Name", width=160, stretch=False)
+        self.loot_tree.column("LootDrop Name", width=160, stretch=True)
         self.loot_tree.column("Multiplier", width=65, stretch=False)
         self.loot_tree.column("MinDrop", width=65, stretch=False)
         self.loot_tree.column("DropLimit", width=65, stretch=False)
         self.loot_tree.column("Probability", width=69, stretch=False)
         
+        # Hidden vertical scrollbar (no visible widget) to enable scroll mechanics
+        try:
+            vbar_lt = ttk.Scrollbar(loottable_tree_frame, orient="vertical", command=self.loot_tree.yview)
+            self.loot_tree.configure(yscrollcommand=vbar_lt.set)
+            # Do not grid the scrollbar to keep it hidden, but keep a reference
+            if not hasattr(self, "_hidden_scrollbars"):
+                self._hidden_scrollbars = []
+            self._hidden_scrollbars.append(vbar_lt)
+        except Exception:
+            pass
+
         self.loot_tree.grid(row=1, column=0, sticky="nsew")
         
         # Bind events
         self.loot_tree.bind("<<TreeviewSelect>>", self.on_lootdrop_select)
         self.loot_tree.bind("<Double-1>", self.on_loottable_edit)
         self.setup_treeview_sorting(self.loot_tree)
+        self._enable_tree_mousewheel(self.loot_tree)
     
     def create_lootdrop_section(self):
         """Create loot drop management section"""
-        # Loot drop frame
+        # Loot drop frame (placed in same row as the Loot Table tree)
         lootdrop_frame = ttk.Frame(self.middle_root_frame)
-        lootdrop_frame.grid(row=0, column=1, sticky="nsew", padx=5)
-        
+        lootdrop_frame.grid(row=1, column=2, sticky="nsew", padx=5)
+        # Make two columns: tree (expands) + right controls (fixed)
+        lootdrop_frame.grid_columnconfigure(0, weight=1)
+        lootdrop_frame.grid_columnconfigure(1, weight=0)
+        lootdrop_frame.grid_rowconfigure(0, weight=1)
+
         # Loot drop tree frame
         loot_tree2_frame = ttk.Frame(lootdrop_frame, relief=tk.SUNKEN, borderwidth=2)
-        loot_tree2_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5, columnspan=2)
+        # Frame fills available space similar to other tree frames
+        loot_tree2_frame.grid(row=0, column=0, sticky="nsew", padx=(5,0), pady=5)
         loot_tree2_frame.grid_rowconfigure(1, weight=1)
         loot_tree2_frame.grid_columnconfigure(0, weight=1)
         
         ttk.Label(loot_tree2_frame, text="Loot Drop Entries", font=("Arial", 12, "bold")).grid(row=0, column=0, sticky="w")
         
-        self.loot_tree2 = ttk.Treeview(loot_tree2_frame, 
+        self.loot_tree2 = ttk.Treeview(loot_tree2_frame,
                                       columns=("Item ID", "Item Name", "Charges", "Equip", "Chance", 
                                               "  Triv \nMinLvl", "  Triv \nMaxLvl", "Multiplier", 
                                               " NPC \nMinLvl", " NPC \nMaxLvl", "Min\nXpac", "Max\nXpac"), 
@@ -317,36 +342,97 @@ class LootManagerTool:
             self.loot_tree2.heading(col, text=col)
             self.loot_tree2.column(col, width=100, stretch=True)
         
-        # Set specific column widths
-        self.loot_tree2.column("Item ID", width=55, stretch=False)
-        self.loot_tree2.column("Item Name", width=150, stretch=False)
-        self.loot_tree2.column("Charges", width=50, stretch=False)
-        self.loot_tree2.column("Equip", width=50, stretch=False)
-        self.loot_tree2.column("Chance", width=50, stretch=False)
-        self.loot_tree2.column("  Triv \nMinLvl", width=55, stretch=False)
-        self.loot_tree2.column("  Triv \nMaxLvl", width=55, stretch=False)
-        self.loot_tree2.column("Multiplier", width=60, stretch=False)
-        self.loot_tree2.column(" NPC \nMinLvl", width=58, stretch=False)
-        self.loot_tree2.column(" NPC \nMaxLvl", width=55, stretch=False)
-        self.loot_tree2.column("Min\nXpac", width=55, stretch=False)
-        self.loot_tree2.column("Max\nXpac", width=55, stretch=False)
+        # Set tightened column widths
+        self.loot_tree2.column("Item ID", width=50, stretch=False)
+        self.loot_tree2.column("Item Name", width=120, stretch=True)
+        self.loot_tree2.column("Charges", width=45, stretch=False)
+        self.loot_tree2.column("Equip", width=45, stretch=False)
+        self.loot_tree2.column("Chance", width=45, stretch=False)
+        self.loot_tree2.column("  Triv \nMinLvl", width=50, stretch=False)
+        self.loot_tree2.column("  Triv \nMaxLvl", width=50, stretch=False)
+        self.loot_tree2.column("Multiplier", width=55, stretch=False)
+        self.loot_tree2.column(" NPC \nMinLvl", width=50, stretch=False)
+        self.loot_tree2.column(" NPC \nMaxLvl", width=50, stretch=False)
+        self.loot_tree2.column("Min\nXpac", width=50, stretch=False)
+        self.loot_tree2.column("Max\nXpac", width=50, stretch=False)
         
-        self.loot_tree2.grid(row=1, column=0, sticky="nsew", columnspan=2)
-        
-        # Loot drop modification frame
-        lootdrop_mod_frame = ttk.Frame(lootdrop_frame, relief=tk.SUNKEN, borderwidth=2)
-        lootdrop_mod_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
-        
-        ttk.Button(lootdrop_mod_frame, text="Remove Selected Item from Lootdrop", command=self.remove_item_from_lootdrop).grid(row=0, column=1, pady=5, columnspan=2, padx=10)
-        ttk.Button(lootdrop_mod_frame, text="Add Random Item ID to selected Lootdrop", command=self.add_item_to_lootdrop).grid(row=0, column=0, pady=5, padx=5)
-        ttk.Button(lootdrop_mod_frame, text="Lookup Item by ID", command=self.lookup_item_by_id).grid(row=0, column=3, pady=5, padx=3)
-        
-        ttk.Label(lootdrop_mod_frame, text="------------> Item ID:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
-        self.item_id_entry = ttk.Entry(lootdrop_mod_frame)
-        self.item_id_entry.grid(row=1, column=1, padx=2, pady=5, sticky="w")
-        
-        ttk.Button(lootdrop_mod_frame, text="Add Specific Item", command=self.add_specific_item_to_lootdrop).grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        ttk.Button(lootdrop_mod_frame, text="Notes", command=self.open_notes_window).grid(row=1, column=2, pady=5)
+        # Hidden vertical scrollbar (no visible widget) to enable scroll mechanics
+        try:
+            vbar_ld = ttk.Scrollbar(loot_tree2_frame, orient="vertical", command=self.loot_tree2.yview)
+            self.loot_tree2.configure(yscrollcommand=vbar_ld.set)
+            if not hasattr(self, "_hidden_scrollbars"):
+                self._hidden_scrollbars = []
+            self._hidden_scrollbars.append(vbar_ld)
+        except Exception:
+            pass
+
+        # Place tree; fill within its frame like other trees
+        self.loot_tree2.grid(row=1, column=0, sticky="nsew")
+
+        # Enable mousewheel scrolling without visible scrollbars
+        self._enable_tree_mousewheel(self.loot_tree2)
+
+        # Compact button style for smaller controls
+        style = ttk.Style()
+        try:
+            style.configure("Small.TButton", padding=(4, 2), font=("Arial", 9))
+        except Exception:
+            # Fallback in case theme not initialized yet
+            style.configure("Small.TButton", padding=(4, 2))
+
+        # Custom styles to match dark theme for bordered group and placeholder entry
+        try:
+            entry_bg = style.lookup("TEntry", "fieldbackground") or "#3c3c3c"
+            entry_fg = style.lookup("TEntry", "foreground") or "#ffffff"
+            frame_bg = style.lookup("TFrame", "background") or "#2d2d2d"
+        except Exception:
+            entry_bg, entry_fg, frame_bg = "#3c3c3c", "#ffffff", "#2d2d2d"
+
+        placeholder_fg = "#aaaaaa"
+        style.configure("Placeholder.TEntry", fieldbackground=entry_bg, foreground=placeholder_fg, insertcolor=entry_fg)
+        style.configure("Bordered.TFrame", background=frame_bg, borderwidth=1, relief="sunken")
+
+        # Right-side controls panel anchored to far right of the page section
+        lootdrop_side_frame = ttk.Frame(lootdrop_frame)
+        lootdrop_side_frame.grid(row=0, column=1, sticky="ns", padx=(0,5), pady=5)
+        lootdrop_side_frame.grid_columnconfigure(0, weight=1)
+
+        ttk.Button(lootdrop_side_frame, text="Add Random Item", style="Small.TButton", command=self.add_item_to_lootdrop).grid(row=0, column=0, pady=2, padx=2, sticky="ew")
+        ttk.Button(lootdrop_side_frame, text="Remove Selected", style="Small.TButton", command=self.remove_item_from_lootdrop).grid(row=1, column=0, pady=2, padx=2, sticky="ew")
+        ttk.Button(lootdrop_side_frame, text="Lookup Item by ID", style="Small.TButton", command=self.lookup_item_by_id).grid(row=2, column=0, pady=2, padx=2, sticky="ew")
+
+        # Item ID input group with small border matching theme
+        item_input_frame = ttk.Frame(lootdrop_side_frame, style="Bordered.TFrame")
+        item_input_frame.grid(row=3, column=0, padx=2, pady=(8,2), sticky="ew")
+        item_input_frame.grid_columnconfigure(0, weight=1)
+
+        # Entry with placeholder text (formerly separate label)
+        self.item_id_placeholder = "Item ID:"
+        self.item_id_entry = ttk.Entry(item_input_frame, width=14, style="Placeholder.TEntry")
+        self.item_id_entry.grid(row=0, column=0, padx=4, pady=4, sticky="ew")
+        self.item_id_entry.insert(0, self.item_id_placeholder)
+
+        def _clear_item_id_placeholder(event):
+            if self.item_id_entry.get() == self.item_id_placeholder:
+                self.item_id_entry.delete(0, tk.END)
+                try:
+                    self.item_id_entry.configure(style="TEntry")
+                except Exception:
+                    pass
+
+        def _restore_item_id_placeholder(event):
+            if not self.item_id_entry.get():
+                self.item_id_entry.insert(0, self.item_id_placeholder)
+                try:
+                    self.item_id_entry.configure(style="Placeholder.TEntry")
+                except Exception:
+                    pass
+
+        self.item_id_entry.bind("<FocusIn>", _clear_item_id_placeholder)
+        self.item_id_entry.bind("<FocusOut>", _restore_item_id_placeholder)
+
+        # Button inside the bordered frame
+        ttk.Button(item_input_frame, text="Add Specific Item", style="Small.TButton", command=self.add_specific_item_to_lootdrop).grid(row=1, column=0, padx=4, pady=(0,4), sticky="ew")
         
         # Bind events
         self.loot_tree2.bind("<<TreeviewSelect>>", self.on_item_select)
@@ -384,12 +470,12 @@ class LootManagerTool:
         
         # Define column widths like the original
         column_widths = {
-            "ID": 50, "Name": 150, "Lvl": 25, "Race": 35, "Class": 39, "Body": 36, "HP": 25, "Mana": 35,
-            "Gender": 45, "Texture": 45, "Helm\nTexture": 40, "Size": 45, "  Loot\nTable ID": 50, "Spells\n  ID": 50, 
+            "ID": 50, "Name": 250, "Lvl": 45, "Race": 45, "Class": 45, "Body": 36, "HP": 25, "Mana": 35,
+            "Gender": 45, "Texture": 50, "Helm\nTexture": 40, "Size": 45, "  Loot\nTable ID": 50, "Spells\n  ID": 50, 
             "Faction\n   ID": 45, "Min\ndmg": 40, "Max\ndmg": 40, "Npcspecial\n  attks": 55, "Special\nAbilities": 50,
-            "MR": 35, "CR": 35, "DR": 35, "FR": 35, "PR": 35, "AC": 35, "Attk Delay": 50,
+            "MR": 35, "CR": 35, "DR": 35, "FR": 35, "PR": 35, "AC": 35, "Attk Delay": 55,
             "STR": 35, "STA": 35, "DEX": 35, "AGI": 35, "_INT": 35, "WIS": 35, "Maxlevel": 45,
-            "Skip Global Loot": 60, "Exp Mod": 45
+            "Skip Global Loot": 60, "Exp Mod": 50
         }
         
         for col in npc_columns:
@@ -498,6 +584,14 @@ class LootManagerTool:
             self.minexpac_entry.delete(0, tk.END)
             self.maxexpac_entry.delete(0, tk.END)
             self.item_id_entry.delete(0, tk.END)
+            try:
+                # Restore placeholder example after clearing
+                if hasattr(self, 'item_id_placeholder'):
+                    self.item_id_entry.insert(0, self.item_id_placeholder)
+                    # Ensure placeholder style is applied to match theme
+                    self.item_id_entry.configure(style="Placeholder.TEntry")
+            except Exception:
+                pass
             self.lootdrop_id_entry.delete(0, tk.END)
     
     def search_zone(self):
@@ -1006,9 +1100,7 @@ class LootManagerTool:
         """Add specific item to loot drop"""
         pass
     
-    def open_notes_window(self):
-        """Open notes management window"""
-        pass
+    # Notes button moved to main window; handler removed from this tool
     
     def on_item_select(self, event):
         """CRITICAL: Handle item selection and display stats on image overlay"""
@@ -1302,16 +1394,29 @@ class LootManagerTool:
         selected_item = self.npc_tree.selection()
         if not selected_item:
             return
-        
+
         npc_data = self.npc_tree.item(selected_item, "values")
         print(f"DEBUG: NPC data has {len(npc_data)} columns: {npc_data[:5]}...")  # Debug info
-        
+
         if len(npc_data) < 13:
             print(f"ERROR: Expected at least 13 columns, got {len(npc_data)}")
             return
-        
+
+        # Attempt to update background image based on NPC race (and gender if available)
+        try:
+            race_id = int(npc_data[3]) if npc_data[3] != '' else None
+        except Exception:
+            race_id = None
+        try:
+            gender_val = int(npc_data[8]) if len(npc_data) > 8 and npc_data[8] != '' else None
+        except Exception:
+            gender_val = None
+
+        if race_id is not None:
+            self._set_background_image_for_race(race_id, gender_val)
+
         loottable_id = npc_data[12]  # Loot Table ID column (0-indexed: id, name, level, race, class, bodytype, hp, mana, gender, texture, helmtexture, size, loottable_id)
-        
+
         if loottable_id and loottable_id != "0":
             # Clear existing trees
             for item in self.loot_tree.get_children():
@@ -1419,3 +1524,60 @@ class LootManagerTool:
         
         for col in tree["columns"]:
             tree.heading(col, text=col, command=lambda c=col: sort_treeview(c))
+
+    def _set_background_image_for_race(self, race_id, gender=None):
+        """Update the MAIN background (default.jpg) based on race; do NOT touch item viewer."""
+        try:
+            pattern = os.path.join("images", "raceimages", f"{race_id}_*.jpg")
+            candidates = sorted(glob.glob(pattern))
+
+            def score(path):
+                base = os.path.basename(path)
+                parts = base.split("_")
+                s = 0
+                if len(parts) >= 2 and parts[1] == '2':
+                    s += 10
+                if gender is not None and len(parts) >= 2 and parts[1].isdigit() and int(parts[1]) == gender:
+                    s += 5
+                return -s
+
+            if candidates:
+                candidates.sort(key=score)
+                chosen = candidates[0]
+                img = Image.open(chosen)
+                self.bg2_image = ImageTk.PhotoImage(img)
+                if hasattr(self, 'main_canvas') and self.main_canvas:
+                    try:
+                        self.main_canvas.configure(width=self.bg2_image.width(), height=self.bg2_image.height())
+                    except Exception:
+                        pass
+                    for item in self.main_canvas.find_all():
+                        self.main_canvas.delete(item)
+                    self.main_canvas.create_image(0, 0, anchor="nw", image=self.bg2_image)
+        except Exception as e:
+            print(f"Warning: could not set race background: {e}")
+
+    def _enable_tree_mousewheel(self, tree):
+        """Enable mousewheel scrolling on a Treeview without showing scrollbars."""
+        def _on_mousewheel(event):
+            try:
+                delta = int(-1 * (event.delta / 120))
+                tree.yview_scroll(delta, "units")
+            except Exception:
+                pass
+            return "break"
+
+        def _on_linux_scroll_up(event):
+            tree.yview_scroll(-1, "units")
+            return "break"
+
+        def _on_linux_scroll_down(event):
+            tree.yview_scroll(1, "units")
+            return "break"
+
+        try:
+            tree.bind("<MouseWheel>", _on_mousewheel, add=True)
+            tree.bind("<Button-4>", _on_linux_scroll_up, add=True)
+            tree.bind("<Button-5>", _on_linux_scroll_down, add=True)
+        except Exception:
+            pass
