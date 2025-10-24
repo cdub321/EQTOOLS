@@ -330,6 +330,7 @@ class FactionManagerTool(_TreeviewScrollMixin):
         ttk.Button(button_frame, text="New Faction", command=self.new_faction).grid(row=0, column=1, padx=(0, 5))
         ttk.Button(button_frame, text="Delete Faction", command=self.delete_faction).grid(row=0, column=2)
         ttk.Button(button_frame, text="Explain", command=self.explain_selected_faction).grid(row=0, column=3, padx=(10, 0))
+        ttk.Button(button_frame, text="Guide", command=self.open_faction_guide).grid(row=0, column=4, padx=(10, 0))
         
         # Settings row (explainer, modifiers, associations)
         settings_frame = ttk.Frame(top_right_frame)
@@ -479,16 +480,7 @@ class FactionManagerTool(_TreeviewScrollMixin):
         npc_frame.grid_rowconfigure(1, weight=1)
         npc_frame.grid_columnconfigure(0, weight=1)
         
-        # Search controls
-        npc_search_frame = ttk.Frame(npc_frame)
-        npc_search_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-        npc_search_frame.grid_columnconfigure(0, weight=1)
-        
-        ttk.Label(npc_search_frame, text="Search NPCs:").grid(row=0, column=0, sticky="w")
-        self.npc_search_var = tk.StringVar()
-        self.npc_search_entry = ttk.Entry(npc_search_frame, textvariable=self.npc_search_var)
-        self.npc_search_entry.grid(row=1, column=0, sticky="ew")
-        self.npc_search_var.trace("w", self.filter_npcs)
+        # Inline controls now appear with buttons below the tree
         
         # NPC treeview with all columns from loot_tool plus faction name
         npc_columns = ("ID", "Name", "Lvl", "Race", "Class", "Body", "HP", "Mana",
@@ -519,12 +511,36 @@ class FactionManagerTool(_TreeviewScrollMixin):
         
         # NPC editing disabled per request (view-only)
         
-        # Buttons
+        # Buttons + inline search
         npc_button_frame = ttk.Frame(npc_frame)
         npc_button_frame.grid(row=2, column=0, sticky="ew", pady=(5, 0))
-        
+        npc_button_frame.grid_columnconfigure(0, weight=0)
+        npc_button_frame.grid_columnconfigure(1, weight=0)
+        npc_button_frame.grid_columnconfigure(2, weight=1)
+
         ttk.Button(npc_button_frame, text="Refresh NPCs", command=self.refresh_npcs).grid(row=0, column=0)
         ttk.Button(npc_button_frame, text="Show All NPCs", command=self.show_all_npcs).grid(row=0, column=1, padx=(5, 0))
+
+        # Search entry with placeholder inside the box
+        self.npc_search_placeholder = "Search NPCs"
+        self.npc_search_var = tk.StringVar()
+        self.npc_search_entry = ttk.Entry(npc_button_frame, textvariable=self.npc_search_var)
+        self.npc_search_entry.grid(row=0, column=2, sticky="ew", padx=(10, 0))
+        self.npc_search_entry.insert(0, self.npc_search_placeholder)
+
+        def _npc_search_clear_placeholder(event):
+            if self.npc_search_entry.get() == self.npc_search_placeholder:
+                self.npc_search_entry.delete(0, tk.END)
+
+        def _npc_search_restore_placeholder(event):
+            if not self.npc_search_entry.get():
+                self.npc_search_entry.insert(0, self.npc_search_placeholder)
+
+        self.npc_search_entry.bind("<FocusIn>", _npc_search_clear_placeholder)
+        self.npc_search_entry.bind("<FocusOut>", _npc_search_restore_placeholder)
+
+        # Wire live filtering; ignore placeholder value inside handler
+        self.npc_search_var.trace("w", self.filter_npcs)
     
     def load_factions(self):
         """Load factions from database"""
@@ -859,6 +875,46 @@ class FactionManagerTool(_TreeviewScrollMixin):
             ttk.Button(dlg, text="Close", command=dlg.destroy).pack(pady=(0,8))
         except Exception as e:
             messagebox.showerror("Error", f"Could not explain relationships: {e}")
+
+    def open_faction_guide(self):
+        """Open a developer-focused guide with concrete, flow-style examples."""
+        guide = tk.Toplevel(self.parent)
+        guide.title("Faction System Guide")
+        guide.geometry("800x680")
+        guide.transient(self.parent)
+
+        container = ttk.Frame(guide)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        # Use a Text widget for better formatting and scrolling
+        text = tk.Text(container, wrap=tk.WORD)
+        try:
+            # Apply dark theme text styling if available
+            style = getattr(self, 'style', None)
+            if style and hasattr(style, 'configure_text_widget'):
+                style.configure_text_widget(text)
+        except Exception:
+            pass
+
+        text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Minimal scrollbar for large content
+        sb = ttk.Scrollbar(container, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Load content from factionisdumb.MD at project root
+        try:
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            md_path = os.path.join(project_root, "factionisdumb.MD")
+            with open(md_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            # Fallback message if file missing/unreadable
+            content = "Faction guide file not found (factionisdumb.MD)."
+
+        text.insert("1.0", content)
+        text.config(state=tk.DISABLED)
+        ttk.Button(guide, text="Close", command=guide.destroy).pack(pady=(4,8))
     
     def load_faction_entries(self, npc_faction_id):
         """Load faction entries for a specific NPC faction group"""
@@ -894,7 +950,8 @@ class FactionManagerTool(_TreeviewScrollMixin):
     def load_faction_npcs(self, faction_id):
         """Load NPCs that use this faction"""
         try:
-            # Clear existing items
+            # Prepare cache and clear existing items
+            all_rows = []
             for item in self.npc_tree.get_children():
                 self.npc_tree.delete(item)
             
@@ -930,7 +987,10 @@ class FactionManagerTool(_TreeviewScrollMixin):
                     npc.get('STR'), npc.get('STA'), npc.get('DEX'), npc.get('AGI'), npc.get('_INT'), 
                     npc.get('WIS'), npc.get('maxlevel'), npc.get('skip_global_loot'), npc.get('exp_mod')
                 ]
-                self.npc_tree.insert("", "end", values=npc_values)
+                all_rows.append(tuple(npc_values))
+            # Cache and (re)build tree respecting current filter
+            self._npc_all_rows = all_rows
+            self.filter_npcs()
                 
         except Exception as e:
             messagebox.showerror("Database Error", f"Failed to load NPCs: {e}")
@@ -1271,7 +1331,8 @@ class FactionManagerTool(_TreeviewScrollMixin):
     def show_all_npcs(self):
         """Show all NPCs regardless of faction"""
         try:
-            # Clear existing items
+            # Prepare cache and clear existing items
+            all_rows = []
             for item in self.npc_tree.get_children():
                 self.npc_tree.delete(item)
             
@@ -1301,27 +1362,40 @@ class FactionManagerTool(_TreeviewScrollMixin):
                     npc.get('STR'), npc.get('STA'), npc.get('DEX'), npc.get('AGI'), npc.get('_INT'), 
                     npc.get('WIS'), npc.get('maxlevel'), npc.get('skip_global_loot'), npc.get('exp_mod')
                 ]
-                self.npc_tree.insert("", "end", values=npc_values)
+                all_rows.append(tuple(npc_values))
+            # Cache and show according to current filter (or all if empty)
+            self._npc_all_rows = all_rows
+            # Clear placeholder to display all if it's currently shown
+            if hasattr(self, 'npc_search_entry') and hasattr(self, 'npc_search_placeholder'):
+                if self.npc_search_entry.get() == self.npc_search_placeholder:
+                    self.npc_search_var.set("")
+            self.filter_npcs()
                 
         except Exception as e:
             messagebox.showerror("Database Error", f"Failed to load NPCs: {e}")
     
-    def filter_npcs(self, *args):
-        """Filter NPC list based on search term"""
-        search_term = self.npc_search_var.get().lower()
-        
-        if not search_term:
-            return
-            
-        # Hide items that don't match search
+    def _rebuild_npc_tree(self, rows):
+        """Clear and rebuild the NPC tree with provided rows."""
+        # Clear existing items
         for item in self.npc_tree.get_children():
-            values = self.npc_tree.item(item, "values")
-            npc_name = values[1].lower() if len(values) > 1 else ""
-            
-            if search_term in npc_name:
-                self.npc_tree.item(item, tags=())
-            else:
-                self.npc_tree.item(item, tags=("hidden",))
-        
-        # Configure hidden tag
-        self.npc_tree.tag_configure("hidden", background="")
+            self.npc_tree.delete(item)
+        # Insert rows
+        for vals in rows:
+            self.npc_tree.insert("", "end", values=vals)
+
+    def filter_npcs(self, *args):
+        """Filter NPC list based on search term (rebuild from cached rows)."""
+        if not hasattr(self, '_npc_all_rows'):
+            return
+        term = ""
+        if hasattr(self, 'npc_search_var') and self.npc_search_var.get() is not None:
+            term = self.npc_search_var.get().strip().lower()
+        # Ignore placeholder
+        if hasattr(self, 'npc_search_placeholder') and term == self.npc_search_placeholder.lower():
+            term = ""
+        if not term:
+            self._rebuild_npc_tree(self._npc_all_rows)
+            return
+        # Filter by name contains
+        filtered = [row for row in self._npc_all_rows if len(row) > 1 and term in str(row[1]).lower()]
+        self._rebuild_npc_tree(filtered)
