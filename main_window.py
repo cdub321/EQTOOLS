@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import sys
 import os
+import glob
 from PIL import Image, ImageTk
 
 # Add the current directory to Python path for imports
@@ -21,7 +22,182 @@ from tools.guild_tool import GuildManagerTool
 from tools.misc_tool import MiscManagerTool
 from tools.log_tool import LogManagerTool
 from tools.admin_tool import AdminTool
+from tools.npc_tool import NPCEditorTool
 from shared.settings import SettingsManager
+
+
+class AssetViewer(tk.Toplevel):
+    """Modal viewer to browse race, weapon, and armor/shield images."""
+
+    def __init__(self, master, base_dir):
+        super().__init__(master)
+        self.title("Asset Viewers")
+        self.geometry("1100x720")
+        self.base_dir = base_dir
+        self.preview_image = None
+        self.category_var = tk.StringVar()
+        self.filter_var = tk.StringVar()
+        self.categories = {
+            "Race Images": {
+                "patterns": [(os.path.join(base_dir, "images", "raceimages"), "*.jpg")],
+            },
+            "Weapons": {
+                "patterns": [(os.path.join(base_dir, "images", "Weapon_Images"), "weapon_*.jpg")],
+            },
+            "Armor / Shields / Misc": {
+                "patterns": [(os.path.join(base_dir, "images", "Weapon_Images"), "*.jpg")],
+                "exclude_prefixes": ["weapon_"],
+            },
+        }
+        self._build_ui()
+        self._load_files()
+
+    def _build_ui(self):
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=2)
+        self.grid_rowconfigure(1, weight=1)
+
+        header = ttk.Frame(self, padding=(10, 8, 10, 6))
+        header.grid(row=0, column=0, columnspan=2, sticky="ew")
+        header.grid_columnconfigure(3, weight=1)
+
+        ttk.Label(header, text="Category:").grid(row=0, column=0, sticky="w")
+        category_box = ttk.Combobox(
+            header,
+            textvariable=self.category_var,
+            state="readonly",
+            values=list(self.categories.keys()),
+            width=22,
+        )
+        category_box.grid(row=0, column=1, sticky="w", padx=(6, 12))
+        category_box.bind("<<ComboboxSelected>>", lambda _e: self._load_files())
+        if not self.category_var.get():
+            self.category_var.set("Race Images")
+
+        ttk.Label(header, text="Filter:").grid(row=0, column=2, sticky="w", padx=(6, 4))
+        filter_entry = ttk.Entry(header, textvariable=self.filter_var, width=18)
+        filter_entry.grid(row=0, column=3, sticky="w")
+        filter_entry.bind("<KeyRelease>", lambda _e: self._apply_filter())
+
+        ttk.Button(header, text="Refresh", command=self._load_files, width=10).grid(row=0, column=4, padx=(8, 0))
+
+        list_frame = ttk.Frame(self, padding=(10, 0, 6, 10))
+        list_frame.grid(row=1, column=0, sticky="nsew")
+        list_frame.grid_rowconfigure(1, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
+
+        ttk.Label(list_frame, text="Files").grid(row=0, column=0, sticky="w")
+        self.file_list = tk.Listbox(list_frame, height=25, exportselection=False)
+        self.file_list.grid(row=1, column=0, sticky="nsew")
+        self.file_list.bind("<<ListboxSelect>>", lambda _e: self._show_selected())
+        list_scroll = ttk.Scrollbar(list_frame, orient="vertical", command=self.file_list.yview)
+        list_scroll.grid(row=1, column=1, sticky="ns")
+        self.file_list.configure(yscrollcommand=list_scroll.set)
+
+        preview_frame = ttk.Frame(self, padding=(6, 0, 10, 10))
+        preview_frame.grid(row=1, column=1, sticky="nsew")
+        preview_frame.grid_rowconfigure(1, weight=1)
+        preview_frame.grid_columnconfigure(0, weight=1)
+
+        ttk.Label(preview_frame, text="Preview").grid(row=0, column=0, sticky="w")
+        self.preview_canvas = tk.Canvas(preview_frame, width=1200, height=900, background="#1f1f1f", highlightthickness=1, highlightbackground="#3c3c3c")
+        self.preview_canvas.config(width=950, height=650)
+        self.preview_canvas.grid(row=1, column=0, sticky="nsew")
+        self.status_label = ttk.Label(preview_frame, text="", foreground="#bbbbbb")
+        self.status_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
+
+    def _gather_files(self, category_name):
+        cfg = self.categories.get(category_name, {})
+        patterns = cfg.get("patterns", [])
+        exclude_prefixes = cfg.get("exclude_prefixes", [])
+        files = []
+        for root, pat in patterns:
+            for path in glob.glob(os.path.join(root, pat)):
+                base = os.path.basename(path)
+                if any(base.lower().startswith(pref) for pref in exclude_prefixes):
+                    continue
+                files.append(path)
+        def sort_key(p):
+            base = os.path.basename(p)
+            digits = "".join(ch for ch in base if ch.isdigit())
+            if digits.isdigit():
+                try:
+                    return (0, int(digits))
+                except Exception:
+                    pass
+            return (1, base.lower())
+        files.sort(key=sort_key)
+        return files
+
+    def _load_files(self):
+        self.file_list.delete(0, tk.END)
+        self.preview_canvas.delete("all")
+        self.status_label.configure(text="")
+        category = self.category_var.get() or "Race Images"
+        self.files = self._gather_files(category)
+        self._apply_filter()
+
+    def _apply_filter(self):
+        filter_text = (self.filter_var.get() or "").lower().strip()
+        self.file_list.delete(0, tk.END)
+        for path in self.files:
+            base = os.path.basename(path)
+            if filter_text and filter_text not in base.lower():
+                continue
+            self.file_list.insert(tk.END, base)
+        if self.file_list.size() > 0:
+            self.file_list.selection_set(0)
+            self._show_selected()
+        else:
+            self.preview_canvas.delete("all")
+            self.status_label.configure(text="No files match.")
+
+    def _show_selected(self):
+        sel = self.file_list.curselection()
+        if not sel:
+            return
+        name = self.file_list.get(sel[0])
+        match = None
+        for path in self.files:
+            if os.path.basename(path) == name:
+                match = path
+                break
+        if not match:
+            return
+        self._render_image(match)
+
+    def _render_image(self, path):
+        try:
+            self.preview_canvas.delete("all")
+            img = Image.open(path)
+            max_w = self.preview_canvas.winfo_width() or 950
+            max_h = self.preview_canvas.winfo_height() or 650
+            target_w, target_h = max_w - 12, max_h - 12
+            if target_w < 1 or target_h < 1:
+                target_w, target_h = img.width, img.height
+            scale = min(target_w / img.width, target_h / img.height) if img.width and img.height else 1
+            if scale > 1:
+                scale = max(1, scale * 0.5)  # keep enlarging, but only about half as much
+                new_size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
+                img = img.resize(new_size, Image.LANCZOS)
+            else:
+                img.thumbnail((target_w, target_h), Image.LANCZOS)
+            self.preview_image = ImageTk.PhotoImage(img)
+            x = max((max_w - self.preview_image.width()) // 2, 0)
+            y = max((max_h - self.preview_image.height()) // 2, 0)
+            self.preview_canvas.create_rectangle(0, 0, max_w, max_h, fill="#1f1f1f", outline="#3c3c3c")
+            self.preview_canvas.create_image(x, y, anchor="nw", image=self.preview_image)
+            self.preview_canvas.create_text(
+                x + 4,
+                y + self.preview_image.height() + 8,
+                text=os.path.basename(path),
+                anchor="nw",
+                fill="#cfcfcf",
+                font=("Arial", 9, "bold"),
+            )
+            self.status_label.configure(text=path)
+        except Exception as exc:
+            self.status_label.configure(text=f"Failed to load image: {exc}")
 
 class EQToolsSuite:
     """Main application window with tabbed interface for EQ Tools"""
@@ -275,12 +451,15 @@ class EQToolsSuite:
         title_frame.grid(row=0, column=1, sticky="ew")
         title_frame.grid_columnconfigure(0, weight=1)
         title_frame.grid_columnconfigure(1, weight=0)
+        title_frame.grid_columnconfigure(2, weight=0)
 
         title_label = ttk.Label(title_frame, text="EQEmulator Tool Suite", font=("Arial", 14, "bold"))
         title_label.grid(row=0, column=0, sticky="n", padx=(0, 450))
 
         notebook_button = ttk.Button(title_frame, text="📝 Notes", command=self.open_notebook, width=10)
         notebook_button.grid(row=0, column=1, padx=(10, 0))
+        viewers_button = ttk.Button(title_frame, text="📁 Viewers", command=self.open_asset_viewer, width=10)
+        viewers_button.grid(row=0, column=2, padx=(10, 0))
 
         # Column 2 intentionally empty (favicon set at window level)
     
@@ -291,6 +470,7 @@ class EQToolsSuite:
             ("Inventory", "inventory"), 
             ("Tradeskill", "tradeskill"),
             ("Loot Tables", "loot"),
+            ("NPC Editor", "npc"),
             ("Factions", "faction"),
             ("Guilds", "guild"),
             ("Misc", "misc"),
@@ -332,7 +512,7 @@ class EQToolsSuite:
         # Update status (if status bar exists)
         if hasattr(self, 'status_var') and self.status_var is not None:
             tab_names = {"aa": "AA Manager", "inventory": "Inventory", 
-                        "tradeskill": "Tradeskill", "loot": "Loot Tables", 
+                        "tradeskill": "Tradeskill", "loot": "Loot Tables", "npc": "NPC Editor",
                         "faction": "Faction Manager", "guild": "Guild Manager", "misc": "Misc Manager",
                         "log": "Log Manager", "admin": "Admin"}
             self.status_var.set(f"Entelion's EQEmulator Tool Suite - {tab_names[tab_key]}")
@@ -389,6 +569,13 @@ class EQToolsSuite:
         self.faction_tool = FactionManagerTool(faction_frame, self.db_manager, self.notes_db)
         self.tab_frames["faction"] = faction_frame
         
+        # NPC Editor Tab
+        npc_frame = ttk.Frame(self.content_frame)
+        npc_frame.grid_rowconfigure(0, weight=1)
+        npc_frame.grid_columnconfigure(0, weight=1)
+        self.npc_tool = NPCEditorTool(npc_frame, self.db_manager)
+        self.tab_frames["npc"] = npc_frame
+        
         # Guild Manager Tab
         guild_frame = ttk.Frame(self.content_frame)
         guild_frame.grid_rowconfigure(0, weight=1)
@@ -429,12 +616,23 @@ class EQToolsSuite:
         self.status_bar = ttk.Label(self.root, textvariable=self.status_var, 
                                    relief="sunken", anchor="w")
         self.status_bar.grid(row=2, column=0, sticky="ew", padx=5, pady=(0, 5))
-    
+
     def open_notebook(self):
         """Open the notebook window"""
         if self.notebook_manager is None:
             self.notebook_manager = NotebookManager()
         self.notebook_manager.show_notebook(self.root)
+
+    def open_asset_viewer(self):
+        """Open a modal viewer for race/weapon/armor assets."""
+        try:
+            if hasattr(self, "_asset_viewer") and self._asset_viewer and self._asset_viewer.winfo_exists():
+                self._asset_viewer.lift()
+                return
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            self._asset_viewer = AssetViewer(self.root, base_dir)
+        except Exception as exc:
+            messagebox.showerror("Viewer Error", f"Unable to open asset viewers:\n{exc}")
     
     def on_closing(self):
         """Handle application closing"""
