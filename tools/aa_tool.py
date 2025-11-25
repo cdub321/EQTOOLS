@@ -969,18 +969,17 @@ class AAManagerTool:
             return None
     
     def get_spell_details(self, spell_id):
-        """Get spell details from notes.db"""
-        if not self.notes_db or spell_id <= 0:
+        """Get spell details from the main EQ server database"""
+        if not self.db_manager or spell_id <= 0:
             return None
             
         try:
-            cursor = self.notes_db.cursor()
-            cursor.execute("""
-                SELECT * FROM spells WHERE id = ?
-            """, (spell_id,))
-            
-            result = cursor.fetchone()
-            return dict(result) if result else None
+            result = self.db_manager.execute_query(
+                "SELECT * FROM spells_new WHERE id = %s",
+                (spell_id,),
+                fetch_all=False,
+            )
+            return result if result else None
             
         except Exception as err:
             print(f"Error getting spell details: {err}")
