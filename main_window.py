@@ -14,6 +14,7 @@ from shared.notes_db import NotesDBManager
 from dictionaries import *
 from notebook import NotebookManager
 from tools.aa_tool import AAManagerTool
+from tools.spells_tool import SpellsManagerTool
 from tools.inventory_tool import InventoryManagerTool
 from tools.loot_tool import LootManagerTool
 from tools.tradeskill_tool import TradeskillManagerTool
@@ -467,6 +468,7 @@ class EQToolsSuite:
         """Create custom tab buttons"""
         tabs = [
             ("AA Manager", "aa"),
+            ("Spells", "spells"),
             ("Inventory", "inventory"), 
             ("Tradeskill", "tradeskill"),
             ("Loot Tables", "loot"),
@@ -514,7 +516,7 @@ class EQToolsSuite:
             tab_names = {"aa": "AA Manager", "inventory": "Inventory", 
                         "tradeskill": "Tradeskill", "loot": "Loot Tables", "npc": "NPC Editor",
                         "faction": "Faction Manager", "guild": "Guild Manager", "misc": "Misc Manager",
-                        "log": "Log Manager", "admin": "Admin"}
+                        "log": "Log Manager", "admin": "Admin", "spells": "Spells Manager"}
             self.status_var.set(f"Entelion's EQEmulator Tool Suite - {tab_names[tab_key]}")
             self.append_client_dir_to_status()
     
@@ -536,6 +538,13 @@ class EQToolsSuite:
         # Create the actual AA Manager tool
         self.aa_tool = AAManagerTool(aa_frame, self.db_manager, self.notes_db)
         self.tab_frames["aa"] = aa_frame
+
+        # Spells Manager Tab
+        spells_frame = ttk.Frame(self.content_frame)
+        spells_frame.grid_rowconfigure(0, weight=1)
+        spells_frame.grid_columnconfigure(0, weight=1)
+        self.spells_tool = SpellsManagerTool(spells_frame, self.db_manager, self.notes_db)
+        self.tab_frames["spells"] = spells_frame
         
         # Inventory Manager Tab - Replace placeholder with actual tool
         inventory_frame = ttk.Frame(self.content_frame)
