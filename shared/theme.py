@@ -97,7 +97,7 @@ def set_dark_theme(root):
                    font=("Arial", 10),
                    borderwidth=1,
                    relief="raised",
-                   padding=(1,1,1,15))
+                   padding=(2, 2, 2, 2))
     
     # Configure heading separator
     style.configure("Treeview.Heading.Separator", background="black")

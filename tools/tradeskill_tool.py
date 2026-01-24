@@ -16,9 +16,10 @@ from dictionaries import (
 
 class TreeviewEdit:
     """Cell editing functionality for Treeview widgets"""
-    def __init__(self, tree, editable_columns=None, update_callback=None):
+    def __init__(self, tree, editable_columns=None, numeric_columns=None, update_callback=None):
         self.tree = tree
         self.editable_columns = editable_columns or []  # List of column indices that can be edited
+        self.numeric_columns = set(numeric_columns or [])
         self.update_callback = update_callback  # Callback for database updates
         self.editing = False
         self.edit_cell = None
@@ -78,14 +79,8 @@ class TreeviewEdit:
         
         # Validate the new value based on the column type
         try:
-            # For numeric columns, try to convert to int or float
-            if column_index in [0, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]:  # Numeric columns in recipe tree
-                new_value = int(new_value)
-            elif column_index in [0, 1, 3, 4, 5] and 'components' in str(self.tree):  # Numeric columns in components tree
-                new_value = int(new_value)
-            elif column_index in [0, 1] and 'containers' in str(self.tree):  # Numeric columns in containers tree
-                new_value = int(new_value)
-            elif column_index in [0, 1, 3] and 'results' in str(self.tree):  # Numeric columns in results tree
+            # For numeric columns, try to convert to int
+            if column_index in self.numeric_columns:
                 new_value = int(new_value)
         except ValueError:
             messagebox.showerror("Invalid Value", "Please enter a valid numeric value.")
@@ -237,6 +232,7 @@ class TradeskillManagerTool:
 
         # Build layout in the required order so treeviews exist before editing setup
         self.create_top_frame()
+        self.create_containers_panel(row=0, column=4)
         self.create_middle_frame()
         self.create_components_panel(row=1, column=4)
         self.create_results_panel(row=2, column=4)
@@ -246,7 +242,9 @@ class TradeskillManagerTool:
     def create_top_frame(self):
         """Create top frame with search controls"""
         self.top_frame = ttk.Frame(self.main_frame, relief=tk.SUNKEN, borderwidth=1)
-        self.top_frame.grid(row=0, column=0, columnspan=5, padx=5, pady=5, sticky="ew")
+        self.top_frame.grid(row=0, column=0, columnspan=4, padx=5, pady=5, sticky="ew")
+        for col_index in range(4):
+            self.top_frame.grid_columnconfigure(col_index, weight=1)
         
         # Search Frame
         search_frame = ttk.Frame(self.top_frame, relief=tk.SUNKEN, borderwidth=2)
@@ -254,34 +252,35 @@ class TradeskillManagerTool:
         search_frame.grid_columnconfigure(0, weight=1)
         
         # Tradeskill dropdown
-        ttk.Label(search_frame, text="List Recipes By\n   Tradeskill").grid(row=0, column=0, sticky="w")
+        ttk.Label(search_frame, text="List Recipes By\n   Tradeskill").grid(row=0, column=0)
         self.tradeskill_dropdown = ttk.Combobox(search_frame, textvariable=self.tradeskill_var, state="readonly")
         self.tradeskill_dropdown["values"] = ["Select a Tradeskill"] + self.tradeskill_names
         self.tradeskill_dropdown.current(0)
-        self.tradeskill_dropdown.grid(row=1, column=0, sticky="ew", padx=5, pady=(2, 6))
+        self.tradeskill_dropdown.grid(row=1, column=0, padx=5, pady=(2, 6))
         self.tradeskill_dropdown.bind("<<ComboboxSelected>>", self.load_recipes)
         
-        ttk.Label(search_frame, text=" Search Recipe by\nName or Recipe ID:").grid(row=2, column=0, sticky="w")
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
-        search_entry.grid(row=3, column=0, sticky="ew", padx=5, pady=(2, 4))
+        ttk.Label(search_frame, text=" Search Recipe by\nName or Recipe ID:").grid(row=2, column=0)
+        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=24)
+        search_entry.grid(row=3, column=0, padx=5, pady=(2, 4))
         search_button = ttk.Button(search_frame, text="Search", command=self.search_recipes)
-        search_button.grid(row=4, column=0, sticky="ew", padx=5, pady=(0, 5))
+        search_button.grid(row=4, column=0, padx=5, pady=(0, 5))
         
         # Item search frame
         find_byitem_frame = ttk.Frame(self.top_frame, relief=tk.SUNKEN, borderwidth=2)
         find_byitem_frame.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
         find_byitem_frame.grid_columnconfigure(0, weight=1)
         
-        ttk.Button(find_byitem_frame, text="Create New Recipe", command=self.create_new_recipe).grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 2))
-        ttk.Button(find_byitem_frame, text="Delete Selected Recipe", command=self.delete_selected_recipe).grid(row=1, column=0, sticky="ew", padx=5, pady=2)
-        ttk.Label(find_byitem_frame, text="Search Recipe\n    by Item:").grid(row=2, column=0, pady=(6, 0))
-        ttk.Button(find_byitem_frame, text="Search by Item ID", command=self.open_item_search).grid(row=3, column=0, padx=5, pady=(2, 5), sticky="ew")
+        ttk.Button(find_byitem_frame, text="Create New Recipe", command=self.create_new_recipe).grid(row=0, column=0, padx=5, pady=(5, 2))
+        ttk.Button(find_byitem_frame, text="Duplicate Selected Recipe", command=self.duplicate_selected_recipe).grid(row=1, column=0, padx=5, pady=2)
+        ttk.Button(find_byitem_frame, text="Delete Selected Recipe", command=self.delete_selected_recipe).grid(row=2, column=0, padx=5, pady=2)
+        ttk.Label(find_byitem_frame, text="Search Recipe\n    by Item:").grid(row=3, column=0, pady=(6, 0))
+        ttk.Button(find_byitem_frame, text="Search by Item ID", command=self.open_item_search).grid(row=4, column=0, padx=5, pady=(2, 5))
 
         # Selected recipe tradeskill frame
         update_tradeskill_frame = ttk.Frame(self.top_frame, relief=tk.SUNKEN, borderwidth=2)
         update_tradeskill_frame.grid(row=0, column=2, padx=5, pady=5, sticky="nsew")
 
-        ttk.Label(update_tradeskill_frame, text="Selected Recipe\nTradeskill").grid(row=0, column=0, columnspan=2, pady=(0, 5))
+        ttk.Label(update_tradeskill_frame, text="Change Selected Recipe Tradeskill").grid(row=0, column=0, columnspan=2, pady=(0, 5))
 
         self.recipe_tradeskill_dropdown = ttk.Combobox(
             update_tradeskill_frame,
@@ -290,7 +289,7 @@ class TradeskillManagerTool:
         )
         self.recipe_tradeskill_dropdown["values"] = [self.recipe_tradeskill_placeholder] + self.tradeskill_names
         self.recipe_tradeskill_dropdown.current(0)
-        self.recipe_tradeskill_dropdown.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
+        self.recipe_tradeskill_dropdown.grid(row=1, column=0, padx=5, pady=5)
 
         ttk.Button(update_tradeskill_frame, text="Update", command=self.update_selected_recipe_tradeskill).grid(
             row=1, column=1, padx=5, pady=5
@@ -323,11 +322,11 @@ class TradeskillManagerTool:
             self.item_canvas.configure(scrollregion=(0, 0, self.item_bg_image.width(), self.item_bg_image.height()))
             self.item_canvas.create_image(0, 0, anchor="nw", image=self.item_bg_image)
             self.item_canvas.create_text(
-                10,
+                self.item_bg_image.width() // 2,
                 10,
                 text="Select an item to view details.",
                 fill="white",
-                anchor="e",
+                anchor="n",
                 font=("Arial", 10, "italic"),
             )
         except Exception as exc:
@@ -336,46 +335,54 @@ class TradeskillManagerTool:
             self.item_canvas = tk.Canvas(item_viewer_frame, width=400, height=260, highlightthickness=0, bg="#2b2b2b")
             self.item_canvas.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
             self.item_canvas.create_text(
-                10,
+                200,
                 10,
                 text="Select an item to view details.",
                 fill="white",
-                anchor="e",
+                anchor="n",
                 font=("Arial", 10, "italic"),
             )
 
-        # Containers treeview (top row, far right)
-        containers_frame = ttk.Frame(self.top_frame, relief=tk.SUNKEN, borderwidth=2)
-        containers_frame.grid(row=0, column=4, padx=5, pady=5, sticky="n")
+        # Containers treeview now lives in the right column panel
+
+    def create_containers_panel(self, row, column):
+        """Create containers management frame"""
+        containers_frame = ttk.Frame(self.main_frame, relief=tk.SUNKEN, borderwidth=2)
+        containers_frame.grid(row=row, column=column, padx=5, pady=5, sticky="nsew")
         containers_frame.grid_columnconfigure(0, weight=1)
 
         container_controls = ttk.Frame(containers_frame)
         container_controls.grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 2))
-        container_controls.grid_columnconfigure(3, weight=1)
+        container_controls.grid_columnconfigure(2, weight=1)
 
         ttk.Button(container_controls, text="Delete Selected", command=self.delete_selected_container).grid(row=0, column=0, padx=2, pady=2, sticky="w")
         ttk.Button(container_controls, text="Add Random", command=self.add_stock_container).grid(row=0, column=1, padx=2, pady=2, sticky="w")
-        ttk.Button(container_controls, text="Add Container by ID:", command=self.add_specific_container).grid(row=0, column=2, padx=2, pady=2, sticky="w")
-        ttk.Entry(container_controls, textvariable=self.contain_itemid_var).grid(row=0, column=3, padx=2, pady=2, sticky="ew")
+        ttk.Button(container_controls, text="Add Container by ID:", command=self.add_specific_container).grid(row=0, column=2, padx=2, pady=2, sticky="e")
+        ttk.Entry(container_controls, textvariable=self.contain_itemid_var, width=10).grid(row=0, column=3, padx=2, pady=2, sticky="e")
+        ttk.Button(container_controls, text="List Containers", command=self.open_container_list).grid(row=0, column=4, padx=2, pady=2, sticky="e")
 
         ttk.Label(containers_frame, text="Containers", font=("Arial", 12, "bold")).grid(row=1, column=0, pady=(2, 2))
 
         container_columns = [
-            ("Entry ID", 110, False, "numeric"),
-            ("Container ID", 80, False, "numeric"),
-            ("Container Name", 200, True, "text")
+            ("entry_id", "Entry ID", 110, False, "numeric"),
+            ("container_id", "Container ID", 80, False, "numeric"),
+            ("container_name", "Container Name", 200, True, "text"),
         ]
 
         self.containers_tree = ttk.Treeview(
             containers_frame,
-            columns=("Entry ID", "Container ID", "Container Name"),
+            columns=("entry_id", "container_id", "container_name"),
             show="headings",
             height=4,
         )
 
-        for col, width, stretch, sort_type in container_columns:
-            self.containers_tree.heading(col, text=col, command=lambda c=col, st=sort_type: self.sort_treeview(self.containers_tree, c, st))
-            self.containers_tree.column(col, width=width, stretch=stretch, anchor="center")
+        for col_id, heading, width, stretch, sort_type in container_columns:
+            self.containers_tree.heading(
+                col_id,
+                text=heading,
+                command=lambda c=col_id, st=sort_type: self.sort_treeview(self.containers_tree, c, st),
+            )
+            self.containers_tree.column(col_id, width=width, stretch=stretch, anchor="center")
 
         self.containers_tree.grid(row=2, column=0, sticky="new", padx=5, pady=5)
         self.bind_treeview_scrolling(self.containers_tree)
@@ -398,31 +405,39 @@ class TradeskillManagerTool:
         recipe_view_frame.grid_rowconfigure(1, weight=1)
         
         # Recipe treeview
-        self.recipe_tree = ttk.Treeview(recipe_view_frame, columns=(
-            "\nID", "\nName", "  Skill\nNeeded", "\nTrivial", " No\nFail", " Replace\nContainer", 
-            "\nNotes", "Must\nLearn", "Learned by\n  Item ID", "\nQuest", "\nEnabled?", "Min\nXpac", "Max\nXpac"
-        ), show="headings")
+        self.recipe_tree = ttk.Treeview(
+            recipe_view_frame,
+            columns=(
+                "id", "name", "skillneeded", "trivial", "nofail", "replace_container",
+                "notes", "must_learn", "learned_by_item_id", "quest", "enabled", "min_expansion", "max_expansion",
+            ),
+            show="headings",
+        )
         
         # Configure columns
         column_configs = [
-            ("\nID", 70, False, "numeric"),
-            ("\nName", 225, True, "text"),
-            ("  Skill\nNeeded", 55, False, "numeric"),
-            ("\nTrivial", 45, False, "numeric"),
-            (" No\nFail", 35, False, "numeric"),
-            (" Replace\nContainer", 60, False, "numeric"),
-            ("\nNotes", 220, False, "text"),
-            ("Must\nLearn", 50, False, "numeric"),
-            ("Learned by\n  Item ID", 70, False, "numeric"),
-            ("\nQuest", 40, False, "numeric"),
-            ("\nEnabled?", 60, False, "numeric"),
-            ("Min\nXpac", 40, False, "numeric"),
-            ("Max\nXpac", 40, False, "numeric")
+            ("id", "ID", 70, False, "numeric"),
+            ("name", "Name", 170, False, "text"),
+            ("skillneeded", "Skill Needed", 75, False, "numeric"),
+            ("trivial", "Triv", 45, False, "numeric"),
+            ("nofail", "NoFail", 55, False, "numeric"),
+            ("replace_container", "ReplCont", 75, False, "numeric"),
+            ("notes", "Notes", 180, False, "text"),
+            ("must_learn", "MustLearn", 75, False, "numeric"),
+            ("learned_by_item_id", "LearnItemID", 85, False, "numeric"),
+            ("quest", "Quest", 50, False, "numeric"),
+            ("enabled", "Enabled", 70, False, "numeric"),
+            ("min_expansion", "MinXp", 55, False, "numeric"),
+            ("max_expansion", "MaxXp", 55, False, "numeric"),
         ]
         
-        for col, width, stretch, sort_type in column_configs:
-            self.recipe_tree.heading(col, text=col, command=lambda c=col, st=sort_type: self.sort_treeview(self.recipe_tree, c, st))
-            self.recipe_tree.column(col, width=width, stretch=stretch, anchor="center")
+        for col_id, heading, width, stretch, sort_type in column_configs:
+            self.recipe_tree.heading(
+                col_id,
+                text=heading,
+                command=lambda c=col_id, st=sort_type: self.sort_treeview(self.recipe_tree, c, st),
+            )
+            self.recipe_tree.column(col_id, width=width, stretch=stretch, anchor="center")
         
         self.recipe_tree.configure(height=18)
         self.recipe_tree.grid(row=1, column=0, sticky="nsew", columnspan=4, rowspan=2, padx=5, pady=5)
@@ -438,29 +453,36 @@ class TradeskillManagerTool:
         components_frame.grid(row=row, column=column, padx=5, pady=5, sticky="nsew")
         
         # Components header and controls
+        components_frame.grid_columnconfigure(2, weight=1)
         ttk.Button(components_frame, text="Delete Selected", command=self.delete_selected_comp).grid(row=0, column=0, padx=2, pady=2, sticky="w")
         ttk.Button(components_frame, text="Add Random", command=self.add_random_comp).grid(row=0, column=1, padx=2, pady=2, sticky="w")
-        ttk.Button(components_frame, text="Add Item by ID:", command=self.add_specific_comp).grid(row=0, column=2, padx=2, pady=2, sticky="w")
-        ttk.Entry(components_frame, textvariable=self.comp_itemid_var).grid(row=0, column=3, padx=2, pady=2, sticky="we")
+        ttk.Button(components_frame, text="Add Item by ID:", command=self.add_specific_comp).grid(row=0, column=2, padx=2, pady=2, sticky="e")
+        ttk.Entry(components_frame, textvariable=self.comp_itemid_var, width=10).grid(row=0, column=3, padx=2, pady=2, sticky="e")
         ttk.Label(components_frame, text="Components", font=("Arial", 12, "bold")).grid(row=1, column=0, pady=3, columnspan=4)
         
         # Components treeview
-        self.components_tree = ttk.Treeview(components_frame, columns=(
-            "Entry\n  ID", "Item\n ID", "\nItem Name", "Component\n   Count", "  Fail\nCount", "Salvage\n Count"
-        ), show="headings")
+        self.components_tree = ttk.Treeview(
+            components_frame,
+            columns=("entry_id", "item_id", "item_name", "component_count", "fail_count", "salvage_count"),
+            show="headings",
+        )
         
         component_columns = [
-            ("Entry\n  ID", 60, False, "numeric"),
-            ("Item\n ID", 65, False, "numeric"),
-            ("\nItem Name", 220, True, "text"),
-            ("Component\n   Count", 80, True, "numeric"),
-            ("  Fail\nCount", 70, True, "numeric"),
-            ("Salvage\n Count", 80, True, "numeric")
+            ("entry_id", "Entry\nID", 60, False, "numeric"),
+            ("item_id", "Item\nID", 65, False, "numeric"),
+            ("item_name", "Item Name", 220, True, "text"),
+            ("component_count", "Component\nCount", 80, True, "numeric"),
+            ("fail_count", "Fail\nCount", 70, True, "numeric"),
+            ("salvage_count", "Salvage\nCount", 80, True, "numeric"),
         ]
         
-        for col, width, stretch, sort_type in component_columns:
-            self.components_tree.heading(col, text=col, command=lambda c=col, st=sort_type: self.sort_treeview(self.components_tree, c, st))
-            self.components_tree.column(col, width=width, stretch=stretch, anchor="center")
+        for col_id, heading, width, stretch, sort_type in component_columns:
+            self.components_tree.heading(
+                col_id,
+                text=heading,
+                command=lambda c=col_id, st=sort_type: self.sort_treeview(self.components_tree, c, st),
+            )
+            self.components_tree.column(col_id, width=width, stretch=stretch, anchor="center")
         
         self.components_tree.configure(height=7)
         self.components_tree.grid(row=2, column=0, sticky="nsew", padx=5, pady=5, columnspan=4)
@@ -472,32 +494,40 @@ class TradeskillManagerTool:
         """Create results management frame"""
         results_frame = ttk.Frame(self.main_frame, relief=tk.SUNKEN, borderwidth=2)
         results_frame.grid(row=row, column=column, padx=5, pady=5, sticky="nsew")
-        for col_index in range(4):
-            results_frame.grid_columnconfigure(col_index, weight=1 if col_index == 3 else 0)
+        results_frame.grid_columnconfigure(0, weight=0)
+        results_frame.grid_columnconfigure(1, weight=0)
+        results_frame.grid_columnconfigure(2, weight=1)
+        results_frame.grid_columnconfigure(3, weight=0)
         results_frame.grid_rowconfigure(2, weight=1)
         
         # Results header and controls
         ttk.Button(results_frame, text="Delete Selected", command=self.delete_selected_result).grid(row=0, column=0, padx=2, pady=2, sticky="w")
         ttk.Button(results_frame, text="Add Random", command=self.add_random_result).grid(row=0, column=1, padx=2, pady=2, sticky="w")
-        ttk.Button(results_frame, text="Add Item by ID:", command=self.add_specific_result).grid(row=0, column=2, padx=2, pady=2, sticky="w")
-        ttk.Entry(results_frame, textvariable=self.result_itemid_var).grid(row=0, column=3, padx=2, pady=2, sticky="we")
+        ttk.Button(results_frame, text="Add Item by ID:", command=self.add_specific_result).grid(row=0, column=2, padx=2, pady=2, sticky="e")
+        ttk.Entry(results_frame, textvariable=self.result_itemid_var, width=10).grid(row=0, column=3, padx=2, pady=2, sticky="e")
         ttk.Label(results_frame, text="Results", font=("Arial", 12, "bold")).grid(row=1, column=0, pady=3, columnspan=4)
         
         # Results treeview
-        self.results_tree = ttk.Treeview(results_frame, columns=(
-            "Entry\n  ID", "Item\n ID", " Item\nName", "Success\n  Count"
-        ), show="headings")
+        self.results_tree = ttk.Treeview(
+            results_frame,
+            columns=("entry_id", "item_id", "item_name", "success_count"),
+            show="headings",
+        )
         
         result_columns = [
-            ("Entry\n  ID", 60, False, "numeric"),
-            ("Item\n ID", 60, False, "numeric"),
-            (" Item\nName", 260, True, "text"),
-            ("Success\n  Count", 90, True, "numeric")
+            ("entry_id", "Entry\nID", 60, False, "numeric"),
+            ("item_id", "Item\nID", 60, False, "numeric"),
+            ("item_name", "Item Name", 260, True, "text"),
+            ("success_count", "Success\nCount", 90, True, "numeric"),
         ]
         
-        for col, width, stretch, sort_type in result_columns:
-            self.results_tree.heading(col, text=col, command=lambda c=col, st=sort_type: self.sort_treeview(self.results_tree, c, st))
-            self.results_tree.column(col, width=width, stretch=stretch, anchor="center")
+        for col_id, heading, width, stretch, sort_type in result_columns:
+            self.results_tree.heading(
+                col_id,
+                text=heading,
+                command=lambda c=col_id, st=sort_type: self.sort_treeview(self.results_tree, c, st),
+            )
+            self.results_tree.column(col_id, width=width, stretch=stretch, anchor="center")
         
         self.results_tree.configure(height=6)
         self.results_tree.grid(row=2, column=0, sticky="nsew", padx=5, pady=5, columnspan=4)
@@ -517,29 +547,33 @@ class TradeskillManagerTool:
         """Setup inline editing for all treeviews"""
         # Recipe editor
         self.recipe_editor = TreeviewEdit(
-            self.recipe_tree, 
-            editable_columns=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+            self.recipe_tree,
+            editable_columns=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+            numeric_columns=[2, 3, 4, 5, 7, 8, 9, 10, 11, 12],
             update_callback=self.update_database
         )
         
         # Components editor
         self.components_editor = TreeviewEdit(
-            self.components_tree, 
-            editable_columns=[0, 1, 3, 4, 5],
+            self.components_tree,
+            editable_columns=[3, 4, 5],
+            numeric_columns=[3, 4, 5],
             update_callback=self.update_database
         )
         
         # Containers editor
         self.containers_editor = TreeviewEdit(
-            self.containers_tree, 
-            editable_columns=[0, 1],
+            self.containers_tree,
+            editable_columns=[],
+            numeric_columns=[],
             update_callback=self.update_database
         )
         
         # Results editor
         self.results_editor = TreeviewEdit(
-            self.results_tree, 
-            editable_columns=[0, 1, 3],
+            self.results_tree,
+            editable_columns=[3],
+            numeric_columns=[3],
             update_callback=self.update_database
         )
 
@@ -705,8 +739,14 @@ class TradeskillManagerTool:
             self.item_canvas.create_image(0, 0, anchor="nw", image=self.item_bg_image)
             self.item_canvas.configure(scrollregion=(0, 0, self.item_bg_image.width(), self.item_bg_image.height()))
         if message:
+            canvas_width = self.item_bg_image.width() if self.item_bg_image else self.item_canvas.winfo_reqwidth()
             self.item_canvas.create_text(
-                10, 10, text=message, fill="white", anchor="nw", font=("Arial", 10, "italic")
+                canvas_width // 2,
+                10,
+                text=message,
+                fill="white",
+                anchor="n",
+                font=("Arial", 10, "italic"),
             )
         # Ensure icon references do not keep stale images alive
         self.item_canvas.item_photo = None
@@ -1114,17 +1154,125 @@ class TradeskillManagerTool:
             self.load_recipes()
         else:
             messagebox.showerror("Error", f"Failed to delete recipe '{recipe_name}' (ID {recipe_id}).")
+
+    def duplicate_selected_recipe(self):
+        """Duplicate the selected recipe and its entries."""
+        selected = self.recipe_tree.selection()
+        if not selected:
+            messagebox.showwarning("No Selection", "Please select a recipe to duplicate.")
+            return
+
+        values = self.recipe_tree.item(selected[0], "values")
+        if not values:
+            messagebox.showwarning("No Selection", "Unable to determine the selected recipe.")
+            return
+
+        recipe_id_raw = values[0]
+        try:
+            recipe_id = int(recipe_id_raw)
+        except (TypeError, ValueError):
+            messagebox.showerror("Error", "Invalid recipe ID selected.")
+            return
+
+        recipe_row = self.fetch_data(
+            """
+            SELECT name, tradeskill, skillneeded, trivial, nofail, replace_container, notes, must_learn,
+                   learned_by_item_id, quest, enabled, min_expansion, max_expansion
+            FROM tradeskill_recipe
+            WHERE id = %s
+            """,
+            (recipe_id,),
+            fetch_all=False,
+        )
+
+        if not recipe_row:
+            messagebox.showerror("Error", f"Recipe ID {recipe_id} not found.")
+            return
+
+        base_name = recipe_row["name"] or "Unnamed Recipe"
+        copy_name = f"{base_name} (Copy)"
+
+        insert_query = """
+        INSERT INTO tradeskill_recipe
+        (name, tradeskill, skillneeded, trivial, nofail, replace_container, notes, must_learn,
+         learned_by_item_id, quest, enabled, min_expansion, max_expansion)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        insert_params = (
+            copy_name,
+            recipe_row["tradeskill"],
+            recipe_row["skillneeded"],
+            recipe_row["trivial"],
+            recipe_row["nofail"],
+            recipe_row["replace_container"],
+            recipe_row["notes"],
+            recipe_row["must_learn"],
+            recipe_row["learned_by_item_id"],
+            recipe_row["quest"],
+            recipe_row["enabled"],
+            recipe_row["min_expansion"],
+            recipe_row["max_expansion"],
+        )
+
+        if not self.execute_update(insert_query, insert_params):
+            messagebox.showerror("Error", "Failed to duplicate recipe.")
+            return
+
+        new_recipe_id = self.fetch_data("SELECT LAST_INSERT_ID() as id", fetch_all=False)["id"]
+
+        self.execute_update(
+            """
+            INSERT INTO tradeskill_recipe_entries
+                (recipe_id, item_id, successcount, failcount, componentcount, salvagecount, iscontainer)
+            SELECT %s, item_id, successcount, failcount, componentcount, salvagecount, iscontainer
+            FROM tradeskill_recipe_entries
+            WHERE recipe_id = %s
+            """,
+            (new_recipe_id, recipe_id),
+        )
+
+        tradeskill_name = self.tradeskill_lookup.get(recipe_row["tradeskill"])
+        if tradeskill_name:
+            self.tradeskill_var.set(tradeskill_name)
+        self.load_recipes()
+
+        for child in self.recipe_tree.get_children():
+            item_values = self.recipe_tree.item(child, "values")
+            if str(item_values[0]) == str(new_recipe_id):
+                self.recipe_tree.selection_set(child)
+                self.recipe_tree.focus(child)
+                self.recipe_tree.see(child)
+                self.load_recipe_entries()
+                break
+
+        messagebox.showinfo("Success", f"Recipe duplicated as '{copy_name}' (ID {new_recipe_id}).")
     
     def open_item_search(self):
         """Open item search popup window"""
         popout = tk.Toplevel(self.main_frame)
         popout.title("Search Item by ID")
         popout.geometry("600x400")
+        popout.configure(bg="#2b2b2b")
+
+        style = ttk.Style(popout)
+        style.configure("Popout.TFrame", background="#2b2b2b")
+        style.configure("Popout.TLabel", background="#2b2b2b", foreground="white")
+        style.configure("Popout.TButton", padding=4)
+        style.configure("Popout.TEntry", fieldbackground="#3a3a3a", foreground="white")
+
+        popout.grid_rowconfigure(0, weight=1)
+        popout.grid_columnconfigure(0, weight=1)
+
+        content_frame = ttk.Frame(popout, style="Popout.TFrame")
+        content_frame.grid(row=0, column=0, sticky="nsew")
+        content_frame.grid_rowconfigure(2, weight=1)
+        content_frame.grid_rowconfigure(4, weight=1)
+        content_frame.grid_columnconfigure(1, weight=0)
         
         item_id_var = tk.StringVar()
-        ttk.Label(popout, text="Item ID:").grid(row=0, column=0, padx=5, pady=5)
-        item_id_entry = ttk.Entry(popout, textvariable=item_id_var)
-        item_id_entry.grid(row=0, column=1, padx=5, pady=5)
+        ttk.Label(content_frame, text="Item ID:", style="Popout.TLabel").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        item_id_entry = ttk.Entry(content_frame, textvariable=item_id_var, style="Popout.TEntry", width=10)
+        item_id_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         
         def search_item():
             item_id = item_id_var.get().strip()
@@ -1169,7 +1317,7 @@ class TradeskillManagerTool:
             components_header.config(text=f"Components (Item: {item_name})")
             results_header.config(text=f"Results (Item: {item_name})")
         
-        ttk.Button(popout, text="Search", command=search_item).grid(row=0, column=2, padx=5, pady=5)
+        ttk.Button(content_frame, text="Search", command=search_item, style="Popout.TButton").grid(row=0, column=2, padx=5, pady=5)
         
         def link_to_recipe(event):
             selected_tree = event.widget
@@ -1199,10 +1347,10 @@ class TradeskillManagerTool:
                         break
         
         # Components Results Treeview
-        components_header = ttk.Label(popout, text="Components", font=("Arial", 12, "bold"))
+        components_header = ttk.Label(content_frame, text="Components", font=("Arial", 12, "bold"), style="Popout.TLabel")
         components_header.grid(row=1, column=0, columnspan=3, sticky="w", padx=5, pady=5)
         
-        components_results_tree = ttk.Treeview(popout, columns=("Recipe ID", "Recipe Name", "Component Count"), show="headings")
+        components_results_tree = ttk.Treeview(content_frame, columns=("Recipe ID", "Recipe Name", "Component Count"), show="headings")
         for col in ("Recipe ID", "Recipe Name", "Component Count"):
             components_results_tree.heading(col, text=col)
             components_results_tree.column(col, width=150, stretch=True)
@@ -1210,15 +1358,56 @@ class TradeskillManagerTool:
         components_results_tree.bind("<ButtonRelease-1>", link_to_recipe)
         
         # Results Results Treeview
-        results_header = ttk.Label(popout, text="Results", font=("Arial", 12, "bold"))
+        results_header = ttk.Label(content_frame, text="Results", font=("Arial", 12, "bold"), style="Popout.TLabel")
         results_header.grid(row=3, column=0, columnspan=3, sticky="w", padx=5, pady=5)
         
-        results_results_tree = ttk.Treeview(popout, columns=("Recipe ID", "Recipe Name", "Success Count"), show="headings")
+        results_results_tree = ttk.Treeview(content_frame, columns=("Recipe ID", "Recipe Name", "Success Count"), show="headings")
         for col in ("Recipe ID", "Recipe Name", "Success Count"):
             results_results_tree.heading(col, text=col)
             results_results_tree.column(col, width=150, stretch=True)
         results_results_tree.grid(row=4, column=0, columnspan=3, sticky="nsew", padx=5, pady=5)
         results_results_tree.bind("<ButtonRelease-1>", link_to_recipe)
+
+    def open_container_list(self):
+        """Open a modal listing common container IDs and names."""
+        popout = tk.Toplevel(self.main_frame)
+        popout.title("List Containers")
+        popout.geometry("360x320")
+        popout.configure(bg="#2b2b2b")
+
+        style = ttk.Style(popout)
+        style.configure("Popout.TFrame", background="#2b2b2b")
+        style.configure("Popout.TLabel", background="#2b2b2b", foreground="white")
+
+        content_frame = ttk.Frame(popout, style="Popout.TFrame")
+        content_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        content_frame.grid_columnconfigure(0, weight=1)
+
+        ttk.Label(content_frame, text="Container ID List", style="Popout.TLabel", font=("Arial", 12, "bold")).grid(
+            row=0, column=0, sticky="w", pady=(0, 8)
+        )
+
+        container_lines = [
+            "9  - medicine bag",
+            "10 - toolbox",
+            "11 - research",
+            "12 - mortar",
+            "14 - mixing bowl",
+            "15 - oven",
+            "16 - loom",
+            "17 - forge",
+            "18 - fletching kit",
+            "19 - brew barrel",
+            "20 - jeweler kit",
+            "21 - pottery wheel",
+            "22 - kiln",
+        ]
+        ttk.Label(
+            content_frame,
+            text="\n".join(container_lines),
+            style="Popout.TLabel",
+            justify="left",
+        ).grid(row=1, column=0, sticky="w")
     
     # Helper function to get current recipe ID
     def get_current_recipe_id(self):
@@ -1393,11 +1582,24 @@ class TradeskillManagerTool:
         elif tree in [self.components_tree, self.results_tree, self.containers_tree]:
             # Entry trees (tradeskill_recipe_entries table)
             entry_id = values[0]
-            
-            column_map = {
-                0: "id", 1: "item_id", 3: "componentcount", 4: "failcount", 5: "salvagecount"
-            }
-            
+
+            if tree == self.components_tree:
+                column_map = {
+                    1: "item_id",
+                    3: "componentcount",
+                    4: "failcount",
+                    5: "salvagecount",
+                }
+            elif tree == self.results_tree:
+                column_map = {
+                    1: "item_id",
+                    3: "successcount",
+                }
+            else:
+                column_map = {
+                    1: "item_id",
+                }
+
             if column_index in column_map:
                 column_name = column_map[column_index]
                 query = f"UPDATE tradeskill_recipe_entries SET {column_name} = %s WHERE id = %s"
@@ -1406,25 +1608,9 @@ class TradeskillManagerTool:
                     messagebox.showinfo("Success", f"Entry {entry_id} updated successfully.")
                 else:
                     messagebox.showerror("Error", f"Failed to update entry {entry_id}.")
-            
-            # Special handling for specific trees
-            if tree == self.results_tree and column_index == 3:  # Success count
-                query = "UPDATE tradeskill_recipe_entries SET successcount = %s WHERE id = %s"
-                success = self.execute_update(query, (new_value, entry_id))
-                if success:
-                    messagebox.showinfo("Success", f"Success count for entry {entry_id} updated successfully.")
-                else:
-                    messagebox.showerror("Error", f"Failed to update success count for entry {entry_id}.")
-            
-            if tree == self.containers_tree and column_index == 1:  # Container ID
-                query = "UPDATE tradeskill_recipe_entries SET item_id = %s WHERE id = %s"
-                success = self.execute_update(query, (new_value, entry_id))
-                if success:
-                    messagebox.showinfo("Success", f"Container for entry {entry_id} updated successfully.")
-                    # Update the container name in the tree
+
+                if tree == self.containers_tree and column_index == 1 and success:
                     container_name = self.get_container_name(new_value)
                     new_values = list(values)
                     new_values[2] = container_name
                     tree.item(item_id, values=new_values)
-                else:
-                    messagebox.showerror("Error", f"Failed to update container for entry {entry_id}.")

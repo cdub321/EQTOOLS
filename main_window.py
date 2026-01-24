@@ -445,22 +445,23 @@ class EQToolsSuite:
 
         # Create custom tab buttons
         self.tab_buttons = {}
-        self.create_custom_tabs(tab_frame)
-
-        # Column 1: Title and notebook button
+        self.create_custom_tabs(tab_frame)        # Column 1: Title and action buttons
         title_frame = ttk.Frame(inner_frame)
         title_frame.grid(row=0, column=1, sticky="ew")
         title_frame.grid_columnconfigure(0, weight=1)
         title_frame.grid_columnconfigure(1, weight=0)
         title_frame.grid_columnconfigure(2, weight=0)
+        title_frame.grid_columnconfigure(3, weight=0)
 
         title_label = ttk.Label(title_frame, text="EQEmulator Tool Suite", font=("Arial", 14, "bold"))
         title_label.grid(row=0, column=0, sticky="n", padx=(0, 450))
 
-        notebook_button = ttk.Button(title_frame, text="📝 Notes", command=self.open_notebook, width=10)
-        notebook_button.grid(row=0, column=1, padx=(10, 0))
-        viewers_button = ttk.Button(title_frame, text="📁 Viewers", command=self.open_asset_viewer, width=10)
-        viewers_button.grid(row=0, column=2, padx=(10, 0))
+        item_search_button = ttk.Button(title_frame, text="Search Item", command=self.open_item_search_modal, width=12)
+        item_search_button.grid(row=0, column=1, padx=(10, 0))
+        notebook_button = ttk.Button(title_frame, text="Notes", command=self.open_notebook, width=10)
+        notebook_button.grid(row=0, column=2, padx=(10, 0))
+        viewers_button = ttk.Button(title_frame, text="Viewers", command=self.open_asset_viewer, width=10)
+        viewers_button.grid(row=0, column=3, padx=(10, 0))
 
         # Column 2 intentionally empty (favicon set at window level)
     
@@ -642,6 +643,89 @@ class EQToolsSuite:
             self._asset_viewer = AssetViewer(self.root, base_dir)
         except Exception as exc:
             messagebox.showerror("Viewer Error", f"Unable to open asset viewers:\n{exc}")
+
+    def open_item_search_modal(self):
+        """Open a modal to search items by name or ID."""
+        if hasattr(self, "_item_search_window") and self._item_search_window and self._item_search_window.winfo_exists():
+            self._item_search_window.lift()
+            return
+
+        popout = tk.Toplevel(self.root)
+        popout.title("Item Lookup")
+        popout.geometry("620x420")
+        popout.configure(bg="#2b2b2b")
+        popout.transient(self.root)
+        popout.grab_set()
+        self._item_search_window = popout
+
+        style = ttk.Style(popout)
+        style.configure("SearchItem.TFrame", background="#2b2b2b")
+        style.configure("SearchItem.TLabel", background="#2b2b2b", foreground="white")
+        style.configure("SearchItem.TButton", padding=4)
+        style.configure("SearchItem.TEntry", fieldbackground="#3a3a3a", foreground="white")
+
+        content = ttk.Frame(popout, style="SearchItem.TFrame", padding=10)
+        content.grid(row=0, column=0, sticky="nsew")
+        popout.grid_rowconfigure(0, weight=1)
+        popout.grid_columnconfigure(0, weight=1)
+        content.grid_rowconfigure(2, weight=1)
+        content.grid_columnconfigure(2, weight=1)
+
+        search_mode = tk.StringVar(value="Name")
+        search_value = tk.StringVar()
+
+        ttk.Label(content, text="Search By:", style="SearchItem.TLabel").grid(row=0, column=0, sticky="w")
+        mode_box = ttk.Combobox(content, textvariable=search_mode, values=["Name", "ID"], state="readonly", width=10)
+        mode_box.grid(row=0, column=1, padx=(6, 12), sticky="w")
+
+        ttk.Label(content, text="Query:", style="SearchItem.TLabel").grid(row=0, column=2, sticky="w")
+        query_entry = ttk.Entry(content, textvariable=search_value, style="SearchItem.TEntry", width=24)
+        query_entry.grid(row=0, column=3, padx=(6, 8), sticky="w")
+
+        results_tree = ttk.Treeview(content, columns=("id", "name"), show="headings", height=12)
+        results_tree.heading("id", text="Item ID")
+        results_tree.heading("name", text="Name")
+        results_tree.column("id", width=90, anchor="center", stretch=False)
+        results_tree.column("name", width=420, anchor="w", stretch=True)
+        results_tree.grid(row=2, column=0, columnspan=4, sticky="nsew", pady=(10, 0))
+
+        def run_search():
+            results_tree.delete(*results_tree.get_children())
+            mode = search_mode.get()
+            query = (search_value.get() or "").strip()
+            if not query:
+                return
+            try:
+                if mode == "ID":
+                    if not query.isdigit():
+                        messagebox.showerror("Invalid ID", "Please enter numeric digits for item ID search.", parent=popout)
+                        return
+                    like_query = f"%{query}%"
+                    rows = self.db_manager.execute_query(
+                        "SELECT id, name FROM items WHERE CAST(id AS CHAR) LIKE %s ORDER BY id LIMIT 250",
+                        (like_query,),
+                        fetch_all=True,
+                    )
+                else:
+                    like_query = f"%{query}%"
+                    rows = self.db_manager.execute_query(
+                        "SELECT id, name FROM items WHERE name LIKE %s ORDER BY name LIMIT 250",
+                        (like_query,),
+                        fetch_all=True,
+                    )
+            except Exception as exc:
+                messagebox.showerror("Search Error", f"Failed to search items:\n{exc}", parent=popout)
+                return
+
+            for row in rows or []:
+                results_tree.insert("", "end", values=(row.get("id"), row.get("name")))
+
+        ttk.Button(content, text="Search", command=run_search, style="SearchItem.TButton").grid(
+            row=0, column=4, sticky="w"
+        )
+
+        query_entry.bind("<Return>", lambda _e: run_search())
+        query_entry.focus_set()
     
     def on_closing(self):
         """Handle application closing"""
