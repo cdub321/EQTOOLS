@@ -22,8 +22,14 @@ class DatabaseManager:
     def connect(self):
         """Get or create database connection using configured settings"""
         host = ""
+        user = "eqemu"
+        password = "eqemu"
+        database = "peq"
         if self._settings_manager:
             host = (self._settings_manager.server_ip or "").strip()
+            user = (self._settings_manager.server_user or "eqemu").strip() or "eqemu"
+            password = self._settings_manager.server_password or "eqemu"
+            database = (self._settings_manager.server_db or "peq").strip() or "peq"
 
         if not host:
             messagebox.showerror(
@@ -39,9 +45,9 @@ class DatabaseManager:
             try:
                 self._connection = mysql.connector.connect(
                     host=host,
-                    user="eqemu",
-                    password="eqemu",
-                    database="peq"
+                    user=user,
+                    password=password,
+                    database=database
                 )
                 self._last_host = host
             except Error as err:

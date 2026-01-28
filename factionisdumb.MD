@@ -1,41 +1,77 @@
-Faction Standing = base + R/C/D + action hits + association spillover, then clamp to min/max range.
+- The 'npc_faction' column in the "npc_types" table does NOT point to a faction directly. It points to a faction GROUP.
+- A faction score is tied to "faction_list.id" (one row per faction).
 
-NPCs don’t point to factions; they point to groups.
+How a faction score is calculated (real columns)
 
-Groups decide behavior (assist/neutral/hostile) and action hits.
+Score = base value
+      + race/class/deity modifiers
+      + hits from actions (kills, quests, etc.)
+      + association spillover (other factions linked to this one)
+Then it is clamped between min and max.
 
+Where the numbers live:
+- Base value: "faction_list.base" for the faction.
+- Clamp: "faction_base_data.min" and "faction_base_data.max" for the faction
+  (row keyed by "faction_base_data.client_faction_id = faction_list.id").
+- Race/Class/Deity modifiers: "faction_list_mod" rows for the faction
+  ("faction_list_mod.faction_id", "mod_name", "mod").
+- Association spillover: "faction_association" row where "id" = this faction and
+  "id_1..id_5/mod_1..mod_5" link to other factions.
 
-Make a Faction
-Set name + base.
-Add clamps (min/max).
-Add Race/Class/Deity modifiers if needed.
-Link Factions (optional)
-Add up to 5 associations w/ modifiers
+What is a faction GROUP? (real tables/columns)
 
-Make a Group (NPC policy, Dragons, Tunare)
-Add entries (one per relevant faction):
-Faction Hit: how much an action changes standing.
-NPC Reaction: 1=Assist, 0=Neutral, -1=Hostile.  If your npc has npc_aggro = 1 it will attack other NPCs it is hostile to.
-Temporary: 1 if you don’t want that faction hit to persist.
-Assign Group to NPCs
-Set NPC’s faction group id. Done.
+A group is a row in "npc_faction".
+NPCs use it via "npc_types.npc_faction_id" = "npc_faction.id".
 
+A group has entries in "npc_faction_entries". Each entry says:
+- Faction Hit: "npc_faction_entries.value"
+- NPC Reaction: "npc_faction_entries.npc_value" (1=Assist, 0=Neutral, -1=Hostile)
+- Temporary: "npc_faction_entries.temp" (1 = do not persist)
 
-groups and associations solve different problems.
+Cause and effect:
+- If an NPC has "npc_types.npc_faction_id = 123", the tool loads group 123 from "npc_faction".
+- When that NPC is involved in an action, the rows in "npc_faction_entries" with
+  "npc_faction_id = 123" decide which factions get hit and how the NPC reacts.
 
-When to use a group entry
+Make a faction (step-by-step with DB columns)
+1) Set name and base value.
+   - "faction_list.id", "faction_list.name", "faction_list.base"
+2) Set min/max clamp.
+   - "faction_base_data.client_faction_id", "min", "max"
+3) Add race/class/deity modifiers if you need them.
+   - "faction_list_mod.faction_id", "mod_name", "mod"
+4) (Optional) Add associations (up to 5).
+   - "faction_association.id" and "id_1..id_5/mod_1..mod_5"
 
-Local, action policy: Defines “what changes when this NPC/group is involved.”
-Per-NPC reuse: Many NPCs share the same hit/reaction rules without duplicating rows.
-Context-bound: Only fires when the action goes through that group (e.g., kill/assist that NPC).
+Make a group (step-by-step with DB columns)
+1) Create the group (npc_faction row).
+   - "npc_faction.id", "npc_faction.name", "npc_faction.primaryfaction"
+2) Add entries for each relevant faction.
+   - "npc_faction_entries.npc_faction_id", "faction_id", "value", "npc_value", "temp"
+3) Assign the group ID to NPCs.
+   - "npc_types.npc_faction_id"
 
-When to use an association
+Groups vs associations (short version)
 
-Global coupling: “If A goes up, B should always go down,” regardless of where the gain came from.
-Works without group context: Quest turn-ins, scripts, GM commands, or any standing change that adjusts a single faction still propagates to linked ones.
-Consistency across groups: Avoids duplicating the same “A vs B vs C” math in multiple groups.
-Conflict reduction: Putting the same related factions in multiple groups invites contradictory hits or double-counting. Associations keep the relationship math centralized and predictable.
-Maintenance: Adjust one weight instead of hunting multiple groups to tweak balance.
+Use GROUP entries when:
+- The change depends on which NPC you interacted with.
+- You want multiple NPCs to share the same hit/reaction rules.
 
-Group entries = where the immediate change is defined (what this NPC/group does).
-Associations = how changes ripple to other factions everywhere (global relationship).
+Use ASSOCIATIONS when:
+- You always want gains/losses in one faction to spill into another.
+- The change should happen no matter where the faction change came from
+  (quests, scripts, GM commands, kills, etc.).
+
+One-liners
+- Group entries = "what this NPC/group does to faction when involved."
+- Associations = "global links between factions that always ripple."
+
+Concrete example (follow the IDs)
+1) NPC "a_guard" has "npc_types.id = 2001" and "npc_types.npc_faction_id = 300".
+2) Group 300 exists in "npc_faction.id = 300".
+3) Group 300 has entries:
+   - "npc_faction_entries.npc_faction_id = 300, faction_id = 500, value = -10, npc_value = -1"
+4) Faction 500 exists in "faction_list.id = 500".
+5) Result:
+   - When you kill/help that guard, faction 500 changes by -10 (value),
+     and the NPC reacts as hostile (npc_value = -1) for that group.

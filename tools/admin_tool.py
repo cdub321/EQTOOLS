@@ -51,6 +51,9 @@ class AdminTool(_InvisibleScrollMixin):
         # Tk variables
         self.client_dir_var = tk.StringVar()
         self.server_ip_var = tk.StringVar()
+        self.server_user_var = tk.StringVar()
+        self.server_pass_var = tk.StringVar()
+        self.server_db_var = tk.StringVar()
         self.new_user_var = tk.StringVar()
         self.new_pass_var = tk.StringVar()
 
@@ -74,47 +77,58 @@ class AdminTool(_InvisibleScrollMixin):
     def create_client_settings_frame(self):
         frame = ttk.LabelFrame(self.main_frame, text="Client Settings", padding="5")
         frame.grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 2))
-        frame.grid_columnconfigure(1, weight=1)
+        frame.grid_columnconfigure(1, weight=0)
 
         ttk.Label(frame, text="Client Directory:").grid(row=0, column=0, sticky="w")
-        entry = ttk.Entry(frame, textvariable=self.client_dir_var)
-        entry.grid(row=0, column=1, sticky="ew", padx=(5, 5))
+        entry = ttk.Entry(frame, textvariable=self.client_dir_var, width=40)
+        entry.grid(row=0, column=1, sticky="w", padx=(5, 5))
         ttk.Button(frame, text="Browse", command=self.select_client_directory, width=10).grid(row=0, column=2)
         ttk.Button(frame, text="Save", command=self.save_client_settings, width=8).grid(row=0, column=3, padx=(5, 0))
 
     def create_server_settings_frame(self):
         frame = ttk.LabelFrame(self.main_frame, text="Server Configuration", padding="5")
         frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
-        frame.grid_columnconfigure(1, weight=1)
+        frame.grid_columnconfigure(1, weight=0)
 
         ttk.Label(frame, text="Server IP:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(frame, textvariable=self.server_ip_var).grid(row=0, column=1, sticky="ew", padx=(5, 0))
+        ttk.Entry(frame, textvariable=self.server_ip_var, width=22).grid(row=0, column=1, sticky="w", padx=(5, 0))
 
-        ttk.Button(frame, text="Save Server IP", command=self.save_server_settings, width=18).grid(
-            row=1, column=0, columnspan=2, pady=(8, 0)
+        ttk.Label(frame, text="DB User:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(frame, textvariable=self.server_user_var, width=18).grid(row=1, column=1, sticky="w", padx=(5, 0), pady=(6, 0))
+
+        ttk.Label(frame, text="DB Password:").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(frame, textvariable=self.server_pass_var, show="*", width=18).grid(
+            row=2, column=1, sticky="w", padx=(5, 0), pady=(6, 0)
+        )
+
+        ttk.Label(frame, text="Database:").grid(row=3, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(frame, textvariable=self.server_db_var, width=18).grid(row=3, column=1, sticky="w", padx=(5, 0), pady=(6, 0))
+
+        ttk.Button(frame, text="Save Server Settings", command=self.save_server_settings, width=20).grid(
+            row=4, column=0, columnspan=2, pady=(8, 0)
         )
 
     def create_user_management_frame(self):
         frame = ttk.LabelFrame(self.main_frame, text="User Management", padding="5")
         frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=(0, 5))
-        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=0)
         frame.grid_rowconfigure(1, weight=1)
 
         ttk.Label(frame, text="Existing Users:").grid(row=0, column=0, sticky="w")
         self.user_listbox = tk.Listbox(frame, height=8)
         self._make_widget_invisible_scroll(self.user_listbox)
-        self.user_listbox.grid(row=1, column=0, sticky="nsew", pady=(2, 5))
+        self.user_listbox.grid(row=1, column=0, sticky="w", pady=(2, 5))
 
         controls = ttk.Frame(frame)
         controls.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5, 0))
-        controls.grid_columnconfigure(1, weight=1)
+        controls.grid_columnconfigure(1, weight=0)
 
         ttk.Label(controls, text="Username:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(controls, textvariable=self.new_user_var).grid(row=0, column=1, sticky="ew", padx=(5, 0))
+        ttk.Entry(controls, textvariable=self.new_user_var, width=20).grid(row=0, column=1, sticky="w", padx=(5, 0))
 
         ttk.Label(controls, text="Password:").grid(row=1, column=0, sticky="w", pady=(5, 0))
-        ttk.Entry(controls, textvariable=self.new_pass_var, show="*").grid(
-            row=1, column=1, sticky="ew", padx=(5, 0), pady=(5, 0)
+        ttk.Entry(controls, textvariable=self.new_pass_var, show="*", width=20).grid(
+            row=1, column=1, sticky="w", padx=(5, 0), pady=(5, 0)
         )
 
         button_row = ttk.Frame(frame)
@@ -131,6 +145,9 @@ class AdminTool(_InvisibleScrollMixin):
     def load_settings(self):
         self.client_dir_var.set(self.settings.client_directory)
         self.server_ip_var.set(self.settings.server_ip)
+        self.server_user_var.set(self.settings.server_user)
+        self.server_pass_var.set(self.settings.server_password)
+        self.server_db_var.set(self.settings.server_db)
 
     def save_client_settings(self):
         directory = self.client_dir_var.get().strip()
@@ -143,8 +160,11 @@ class AdminTool(_InvisibleScrollMixin):
 
     def save_server_settings(self):
         self.settings.server_ip = self.server_ip_var.get().strip()
+        self.settings.server_user = self.server_user_var.get().strip()
+        self.settings.server_password = self.server_pass_var.get()
+        self.settings.server_db = self.server_db_var.get().strip()
         self._notify_update()
-        messagebox.showinfo("Server Settings", "Server IP saved.")
+        messagebox.showinfo("Server Settings", "Server settings saved.")
 
     def select_client_directory(self):
         start_dir = self.client_dir_var.get() or os.path.expanduser("~")

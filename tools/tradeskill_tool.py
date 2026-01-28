@@ -234,8 +234,7 @@ class TradeskillManagerTool:
         self.create_top_frame()
         self.create_containers_panel(row=0, column=4)
         self.create_middle_frame()
-        self.create_components_panel(row=1, column=4)
-        self.create_results_panel(row=2, column=4)
+        self.create_entries_panel(row=1, column=4, rowspan=2)
         self.create_instructions()
         self.setup_editing()
     
@@ -447,92 +446,82 @@ class TradeskillManagerTool:
         # Configure recipe view frame grid
 
 
-    def create_components_panel(self, row, column):
-        """Create components management frame"""
-        components_frame = ttk.Frame(self.main_frame, relief=tk.SUNKEN, borderwidth=2)
-        components_frame.grid(row=row, column=column, padx=5, pady=5, sticky="nsew")
-        
-        # Components header and controls
-        components_frame.grid_columnconfigure(2, weight=1)
-        ttk.Button(components_frame, text="Delete Selected", command=self.delete_selected_comp).grid(row=0, column=0, padx=2, pady=2, sticky="w")
-        ttk.Button(components_frame, text="Add Random", command=self.add_random_comp).grid(row=0, column=1, padx=2, pady=2, sticky="w")
-        ttk.Button(components_frame, text="Add Item by ID:", command=self.add_specific_comp).grid(row=0, column=2, padx=2, pady=2, sticky="e")
-        ttk.Entry(components_frame, textvariable=self.comp_itemid_var, width=10).grid(row=0, column=3, padx=2, pady=2, sticky="e")
-        ttk.Label(components_frame, text="Components", font=("Arial", 12, "bold")).grid(row=1, column=0, pady=3, columnspan=4)
-        
-        # Components treeview
-        self.components_tree = ttk.Treeview(
-            components_frame,
-            columns=("entry_id", "item_id", "item_name", "component_count", "fail_count", "salvage_count"),
+    def create_entries_panel(self, row, column, rowspan=1):
+        """Create combined components/results management frame"""
+        entries_frame = ttk.Frame(self.main_frame, relief=tk.SUNKEN, borderwidth=2)
+        entries_frame.grid(row=row, column=column, rowspan=rowspan, padx=5, pady=5, sticky="nsew")
+        for col_index in range(5):
+            entries_frame.grid_columnconfigure(col_index, weight=0)
+        entries_frame.grid_columnconfigure(4, weight=1)
+        entries_frame.grid_rowconfigure(3, weight=1)
+
+        # Controls row - components
+        ttk.Button(entries_frame, text="Delete Selected", command=self.delete_selected_entry).grid(
+            row=0, column=0, padx=2, pady=2, sticky="w"
+        )
+        ttk.Button(entries_frame, text="Add Random Comp", command=self.add_random_comp).grid(
+            row=0, column=1, padx=2, pady=2, sticky="w"
+        )
+        ttk.Button(entries_frame, text="Add Comp by ID:", command=self.add_specific_comp).grid(
+            row=0, column=2, padx=2, pady=2, sticky="e"
+        )
+        ttk.Entry(entries_frame, textvariable=self.comp_itemid_var, width=10).grid(
+            row=0, column=3, padx=2, pady=2, sticky="w"
+        )
+
+        # Controls row - results
+        ttk.Button(entries_frame, text="Add Random Result", command=self.add_random_result).grid(
+            row=1, column=0, padx=2, pady=2, sticky="w"
+        )
+        ttk.Button(entries_frame, text="Add Result by ID:", command=self.add_specific_result).grid(
+            row=1, column=1, padx=2, pady=2, sticky="w"
+        )
+        ttk.Entry(entries_frame, textvariable=self.result_itemid_var, width=10).grid(
+            row=1, column=2, padx=2, pady=2, sticky="w"
+        )
+
+        ttk.Label(entries_frame, text="Entries (Components + Results)", font=("Arial", 12, "bold")).grid(
+            row=2, column=0, pady=3, columnspan=5
+        )
+
+        self.entries_tree = ttk.Treeview(
+            entries_frame,
+            columns=(
+                "entry_id",
+                "item_id",
+                "item_name",
+                "component_count",
+                "success_count",
+                "fail_count",
+                "salvage_count",
+                "role",
+            ),
             show="headings",
         )
-        
-        component_columns = [
+
+        entry_columns = [
             ("entry_id", "Entry\nID", 60, False, "numeric"),
             ("item_id", "Item\nID", 65, False, "numeric"),
-            ("item_name", "Item Name", 220, True, "text"),
-            ("component_count", "Component\nCount", 80, True, "numeric"),
+            ("item_name", "Item Name", 200, True, "text"),
+            ("component_count", "Comp\nCount", 70, True, "numeric"),
+            ("success_count", "Success\nCount", 80, True, "numeric"),
             ("fail_count", "Fail\nCount", 70, True, "numeric"),
             ("salvage_count", "Salvage\nCount", 80, True, "numeric"),
+            ("role", "Role", 80, True, "text"),
         ]
-        
-        for col_id, heading, width, stretch, sort_type in component_columns:
-            self.components_tree.heading(
+
+        for col_id, heading, width, stretch, sort_type in entry_columns:
+            self.entries_tree.heading(
                 col_id,
                 text=heading,
-                command=lambda c=col_id, st=sort_type: self.sort_treeview(self.components_tree, c, st),
+                command=lambda c=col_id, st=sort_type: self.sort_treeview(self.entries_tree, c, st),
             )
-            self.components_tree.column(col_id, width=width, stretch=stretch, anchor="center")
-        
-        self.components_tree.configure(height=7)
-        self.components_tree.grid(row=2, column=0, sticky="nsew", padx=5, pady=5, columnspan=4)
-        self.bind_treeview_scrolling(self.components_tree)
-        self.components_tree.bind("<<TreeviewSelect>>", self.handle_item_tree_selection)
-        
-        # Configure components frame grid
-    def create_results_panel(self, row, column):
-        """Create results management frame"""
-        results_frame = ttk.Frame(self.main_frame, relief=tk.SUNKEN, borderwidth=2)
-        results_frame.grid(row=row, column=column, padx=5, pady=5, sticky="nsew")
-        results_frame.grid_columnconfigure(0, weight=0)
-        results_frame.grid_columnconfigure(1, weight=0)
-        results_frame.grid_columnconfigure(2, weight=1)
-        results_frame.grid_columnconfigure(3, weight=0)
-        results_frame.grid_rowconfigure(2, weight=1)
-        
-        # Results header and controls
-        ttk.Button(results_frame, text="Delete Selected", command=self.delete_selected_result).grid(row=0, column=0, padx=2, pady=2, sticky="w")
-        ttk.Button(results_frame, text="Add Random", command=self.add_random_result).grid(row=0, column=1, padx=2, pady=2, sticky="w")
-        ttk.Button(results_frame, text="Add Item by ID:", command=self.add_specific_result).grid(row=0, column=2, padx=2, pady=2, sticky="e")
-        ttk.Entry(results_frame, textvariable=self.result_itemid_var, width=10).grid(row=0, column=3, padx=2, pady=2, sticky="e")
-        ttk.Label(results_frame, text="Results", font=("Arial", 12, "bold")).grid(row=1, column=0, pady=3, columnspan=4)
-        
-        # Results treeview
-        self.results_tree = ttk.Treeview(
-            results_frame,
-            columns=("entry_id", "item_id", "item_name", "success_count"),
-            show="headings",
-        )
-        
-        result_columns = [
-            ("entry_id", "Entry\nID", 60, False, "numeric"),
-            ("item_id", "Item\nID", 60, False, "numeric"),
-            ("item_name", "Item Name", 260, True, "text"),
-            ("success_count", "Success\nCount", 90, True, "numeric"),
-        ]
-        
-        for col_id, heading, width, stretch, sort_type in result_columns:
-            self.results_tree.heading(
-                col_id,
-                text=heading,
-                command=lambda c=col_id, st=sort_type: self.sort_treeview(self.results_tree, c, st),
-            )
-            self.results_tree.column(col_id, width=width, stretch=stretch, anchor="center")
-        
-        self.results_tree.configure(height=6)
-        self.results_tree.grid(row=2, column=0, sticky="nsew", padx=5, pady=5, columnspan=4)
-        self.bind_treeview_scrolling(self.results_tree)
-        self.results_tree.bind("<<TreeviewSelect>>", self.handle_item_tree_selection)
+            self.entries_tree.column(col_id, width=width, stretch=stretch, anchor="center")
+
+        self.entries_tree.configure(height=12)
+        self.entries_tree.grid(row=3, column=0, sticky="nsew", padx=5, pady=5, columnspan=5)
+        self.bind_treeview_scrolling(self.entries_tree)
+        self.entries_tree.bind("<<TreeviewSelect>>", self.handle_item_tree_selection)
 
     def create_instructions(self):
         """Create instructions label"""
@@ -553,11 +542,11 @@ class TradeskillManagerTool:
             update_callback=self.update_database
         )
         
-        # Components editor
-        self.components_editor = TreeviewEdit(
-            self.components_tree,
-            editable_columns=[3, 4, 5],
-            numeric_columns=[3, 4, 5],
+        # Entries editor
+        self.entries_editor = TreeviewEdit(
+            self.entries_tree,
+            editable_columns=[1, 3, 4, 5, 6],
+            numeric_columns=[1, 3, 4, 5, 6],
             update_callback=self.update_database
         )
         
@@ -569,13 +558,6 @@ class TradeskillManagerTool:
             update_callback=self.update_database
         )
         
-        # Results editor
-        self.results_editor = TreeviewEdit(
-            self.results_tree,
-            editable_columns=[3],
-            numeric_columns=[3],
-            update_callback=self.update_database
-        )
 
     def sort_treeview(self, tree, column, sort_type):
         """Sort a treeview column when its header is clicked."""
@@ -668,7 +650,7 @@ class TradeskillManagerTool:
     
     def clear_recipe_entries(self):
         """Clear all recipe entry subtrees"""
-        for subtree in [self.components_tree, self.containers_tree, self.results_tree]:
+        for subtree in [self.entries_tree, self.containers_tree]:
             subtree.delete(*subtree.get_children())
         self.current_recipe_id = None
         self.set_selected_recipe_tradeskill(None)
@@ -676,7 +658,7 @@ class TradeskillManagerTool:
     
     def clear_all_entries(self):
         """Clear all trees"""
-        for subtree in [self.recipe_tree, self.components_tree, self.containers_tree, self.results_tree]:
+        for subtree in [self.recipe_tree, self.entries_tree, self.containers_tree]:
             subtree.delete(*subtree.get_children())
         self.current_recipe_id = None
         self.set_selected_recipe_tradeskill(None)
@@ -717,10 +699,26 @@ class TradeskillManagerTool:
                 if iscontainer:
                     container_name = self.get_container_name(item_id)
                     self.containers_tree.insert("", "end", values=(entry_id, item_id, container_name))
-                elif successcount > 0:
-                    self.results_tree.insert("", "end", values=(entry_id, item_id, item_name, successcount))
                 else:
-                    self.components_tree.insert("", "end", values=(entry_id, item_id, item_name, componentcount, failcount, salvagecount))
+                    role = "Component"
+                    if successcount > 0 and componentcount > 0:
+                        role = "Both"
+                    elif successcount > 0:
+                        role = "Result"
+                    self.entries_tree.insert(
+                        "",
+                        "end",
+                        values=(
+                            entry_id,
+                            item_id,
+                            item_name,
+                            componentcount,
+                            successcount,
+                            failcount,
+                            salvagecount,
+                            role,
+                        ),
+                    )
     
     def get_container_name(self, container_id):
         """Get container name from ID"""
@@ -754,7 +752,7 @@ class TradeskillManagerTool:
     def handle_item_tree_selection(self, event):
         """Display item details when an item tree selection changes."""
         tree = event.widget
-        if tree not in {self.components_tree, self.containers_tree, self.results_tree}:
+        if tree not in {self.entries_tree, self.containers_tree}:
             return
         selected = tree.selection()
         if not selected:
@@ -1520,7 +1518,7 @@ class TradeskillManagerTool:
         
         if self.execute_update(
             "INSERT INTO tradeskill_recipe_entries (recipe_id, item_id, successcount, failcount, componentcount, salvagecount, iscontainer) "
-            "VALUES (%s, %s, 1, 0, 1, 0, 0)",
+            "VALUES (%s, %s, 1, 0, 0, 0, 0)",
             (recipe_id, int(item_id))
         ):
             self.load_recipe_entries()
@@ -1536,23 +1534,13 @@ class TradeskillManagerTool:
         if self.execute_update("DELETE FROM tradeskill_recipe_entries WHERE id = %s", (entry_id,)):
             self.load_recipe_entries()
     
-    def delete_selected_comp(self):
-        """Delete the selected component from the database"""
-        selected_item = self.components_tree.selection()
+    def delete_selected_entry(self):
+        """Delete the selected entry from the database"""
+        selected_item = self.entries_tree.selection()
         if not selected_item:
-            messagebox.showwarning("No Selection", "Please select a component to delete.")
+            messagebox.showwarning("No Selection", "Please select an entry to delete.")
             return
-        entry_id = self.components_tree.item(selected_item, "values")[0]
-        if self.execute_update("DELETE FROM tradeskill_recipe_entries WHERE id = %s", (entry_id,)):
-            self.load_recipe_entries()
-    
-    def delete_selected_result(self):
-        """Delete the selected result from the database"""
-        selected_item = self.results_tree.selection()
-        if not selected_item:
-            messagebox.showwarning("No Selection", "Please select a result to delete.")
-            return
-        entry_id = self.results_tree.item(selected_item, "values")[0]
+        entry_id = self.entries_tree.item(selected_item, "values")[0]
         if self.execute_update("DELETE FROM tradeskill_recipe_entries WHERE id = %s", (entry_id,)):
             self.load_recipe_entries()
     
@@ -1579,21 +1567,17 @@ class TradeskillManagerTool:
                 else:
                     messagebox.showerror("Error", f"Failed to update recipe {recipe_id}.")
         
-        elif tree in [self.components_tree, self.results_tree, self.containers_tree]:
+        elif tree in [self.entries_tree, self.containers_tree]:
             # Entry trees (tradeskill_recipe_entries table)
             entry_id = values[0]
 
-            if tree == self.components_tree:
+            if tree == self.entries_tree:
                 column_map = {
                     1: "item_id",
                     3: "componentcount",
-                    4: "failcount",
-                    5: "salvagecount",
-                }
-            elif tree == self.results_tree:
-                column_map = {
-                    1: "item_id",
-                    3: "successcount",
+                    4: "successcount",
+                    5: "failcount",
+                    6: "salvagecount",
                 }
             else:
                 column_map = {
@@ -1604,10 +1588,6 @@ class TradeskillManagerTool:
                 column_name = column_map[column_index]
                 query = f"UPDATE tradeskill_recipe_entries SET {column_name} = %s WHERE id = %s"
                 success = self.execute_update(query, (new_value, entry_id))
-                if success:
-                    messagebox.showinfo("Success", f"Entry {entry_id} updated successfully.")
-                else:
-                    messagebox.showerror("Error", f"Failed to update entry {entry_id}.")
 
                 if tree == self.containers_tree and column_index == 1 and success:
                     container_name = self.get_container_name(new_value)

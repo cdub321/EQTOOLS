@@ -324,8 +324,20 @@ class EQToolsSuite:
         ip_entry = ttk.Entry(frame, textvariable=self.config_ip_var)
         ip_entry.grid(row=0, column=1, sticky="ew", padx=(10, 0))
 
+        ttk.Label(frame, text="DB User:").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        self.config_user_var = tk.StringVar(value=self.settings.server_user)
+        ttk.Entry(frame, textvariable=self.config_user_var).grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
+
+        ttk.Label(frame, text="DB Password:").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.config_pass_var = tk.StringVar(value=self.settings.server_password)
+        ttk.Entry(frame, textvariable=self.config_pass_var, show="*").grid(row=2, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
+
+        ttk.Label(frame, text="Database:").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        self.config_db_var = tk.StringVar(value=self.settings.server_db)
+        ttk.Entry(frame, textvariable=self.config_db_var).grid(row=3, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
+
         ttk.Button(frame, text="Save", command=lambda: self.save_server_ip_and_continue(required), width=10).grid(
-            row=1, column=0, columnspan=2, pady=(15, 0)
+            row=4, column=0, columnspan=2, pady=(15, 0)
         )
 
         def on_close():
@@ -344,6 +356,9 @@ class EQToolsSuite:
             return
 
         self.settings.server_ip = ip_address
+        self.settings.server_user = self.config_user_var.get().strip()
+        self.settings.server_password = self.config_pass_var.get()
+        self.settings.server_db = self.config_db_var.get().strip()
         self.config_window.grab_release()
         self.config_window.destroy()
         self.handle_settings_updated()

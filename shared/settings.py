@@ -22,7 +22,10 @@ CREATE TABLE IF NOT EXISTS app_users (
 
 DEFAULT_SETTINGS: Dict[str, str] = {
     "client_directory": "",
-    "server_ip": ""
+    "server_ip": "",
+    "server_user": "eqemu",
+    "server_password": "eqemu",
+    "server_db": "peq"
 }
 
 
@@ -97,6 +100,30 @@ class SettingsManager:
     @server_ip.setter
     def server_ip(self, ip: str) -> None:
         self.set("server_ip", ip)
+
+    @property
+    def server_user(self) -> str:
+        return self.get("server_user")
+
+    @server_user.setter
+    def server_user(self, user: str) -> None:
+        self.set("server_user", user)
+
+    @property
+    def server_password(self) -> str:
+        return self.get("server_password")
+
+    @server_password.setter
+    def server_password(self, password: str) -> None:
+        self.set("server_password", password)
+
+    @property
+    def server_db(self) -> str:
+        return self.get("server_db")
+
+    @server_db.setter
+    def server_db(self, db_name: str) -> None:
+        self.set("server_db", db_name)
 
     def _ensure_default_admin(self) -> None:
         if not self.list_users():
